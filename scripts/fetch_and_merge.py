@@ -17,13 +17,18 @@ def fetch_csv(url, tries=3, timeout=20):
     for k in range(tries):
         try:
             r = requests.get(url, timeout=timeout)
-            if r.status_code == 200 and "text" in r.headers.get("Content-Type",""):
-                return r.text
-            last_err = f"HTTP {r.status_code} content-type {r.headers.get('Content-Type')}"
+            ct = r.headers.get("Content-Type","").lower()
+            txt = r.text
+            # 只接受 CSV；若像 text/html 或開頭是 <html 就拒收
+            if "text/csv" in ct or txt[:128].lstrip().lower().startswith("date,"):
+                return txt
+            last_err = f"unexpected content-type={ct} (first chars: {txt[:40]!r})"
         except Exception as e:
             last_err = str(e)
         time.sleep(2*(k+1))
     raise RuntimeError(f"fetch fail: {last_err} url={url}")
+print(f"[{code}] loaded {len(df)} rows from source")
+
 
 def parse_date_any(s):
     if pd.isna(s): return None
