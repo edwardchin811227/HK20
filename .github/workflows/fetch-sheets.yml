@@ -1,4 +1,6 @@
 name: Fetch Sheets and Build CSVs (15:05 HKT)
+permissions:
+  contents: write
 
 on:
   schedule:
