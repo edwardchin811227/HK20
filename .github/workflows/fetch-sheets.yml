@@ -1,12 +1,13 @@
 name: Fetch Sheets and Build CSVs (15:05 HKT)
-permissions:
-  contents: write
 
 on:
   schedule:
-    # GitHub uses UTC; 15:05 HKT = 07:05 UTC (Mon–Fri)
-    - cron: "5 7 * * 1-5"
+    - cron: "5 7 * * 1-5"   # 15:05 HKT (Mon–Fri)
   workflow_dispatch: {}
+
+# 讓 GITHUB_TOKEN 具有寫入 repository 的權限
+permissions:
+  contents: write  # 推回 CSV 需要這個
 
 jobs:
   build:
@@ -31,16 +32,14 @@ jobs:
         run: |
           python scripts/fetch_and_merge.py
 
-                - name: Commit outputs
+      - name: Commit outputs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          # 用「已暫存」變更判斷（或比較 HEAD）
           if ! git diff --staged --quiet; then
             git commit -m "auto: update data CSVs"
             git push
           else
             echo "No changes to commit."
           fi
-
