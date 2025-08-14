@@ -31,7 +31,7 @@ jobs:
         run: |
           python scripts/fetch_and_merge.py
 
-           - name: Commit outputs
+                - name: Commit outputs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -43,3 +43,4 @@ jobs:
           else
             echo "No changes to commit."
           fi
+
