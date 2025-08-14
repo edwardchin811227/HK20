@@ -56,27 +56,28 @@ def parse_date_any(s):
 
 
 
+# 1) 分位數函式（最小窗=5；<30 用 n 天；>=30 用 30～window）
 def pct_norm(series, window=252, reverse=False):
-    """把近 window 天的位置轉成 [-1, 1]。
-       早期不足 30 天 → 用現有 n 天；少於 5 天 → 回傳 NaN。"""
-    vals = pd.to_numeric(series, errors="coerce").values.astype(float)
+    import pandas as pd, numpy as np
+    vals = pd.to_numeric(series, errors="coerce").values.astype(float)  # 強制轉數值，非法→NaN（官方行為） 
+    # 參考：to_numeric(errors='coerce') 會把無法解析的值變 NaN
     out = []
     for i, v in enumerate(vals):
-        if np.isnan(v):
-            out.append(np.nan); continue
+        if np.isnan(v): out.append(np.nan); continue
         avail = i + 1
-        if avail < 5:                    # 最小視窗=5
+        if avail < 5:               # 最小視窗=5
             out.append(np.nan); continue
-        eff = 30 if avail < 30 else min(window, avail)   # <30 用 n 天；>=30 用 30 或至多 window
+        eff = 30 if avail < 30 else min(window, avail)
         w = vals[i - eff + 1 : i + 1]
         w = w[~np.isnan(w)]
         if len(w) < 5:
             out.append(np.nan); continue
-        rank = (w <= v).sum() / len(w)   # 分位數
-        s = 2 * rank - 1                 # 映射至 [-1, 1]
+        rank = (w <= v).sum() / len(w)
+        s = 2*rank - 1
         if reverse: s = -s
         out.append(s)
     return pd.Series(out, index=series.index, dtype=float)
+
 
 
 def norm_weights(d):
@@ -85,6 +86,7 @@ def norm_weights(d):
     if s == 0: return {k: 1/len(items) for k,_ in items}
     return {k: v/s for k,v in items}
 
+# 2) Fused 加總（全 NaN → NaN，而不是 0）
 def fused(df_norm, weights):
     w = norm_weights(weights)
     tmp = pd.DataFrame(index=df_norm.index)
@@ -92,7 +94,7 @@ def fused(df_norm, weights):
         col = f"{fac}_norm"
         if col in df_norm.columns and fac in w:
             tmp[col] = df_norm[col] * w[fac]
-    # 全是 NaN 時回傳 NaN（不是 0）
+    # pandas 的 sum 預設 all-NA 會回 0，改用 min_count=1 才會回 NaN（官方文件）
     return tmp.sum(axis=1, skipna=True, min_count=1) if not tmp.empty else pd.Series(np.nan, index=df_norm.index)
 
 
