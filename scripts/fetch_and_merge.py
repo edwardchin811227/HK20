@@ -12,36 +12,49 @@ W_MACRO = {"HSI":28, "HSTECH":22, "BTC":15, "USDCNH":20, "VHSI":15}
 W_EQUAL = {"HSI":20, "HSTECH":20, "BTC":20, "USDCNH":20, "VHSI":20}
 WINDOW = 252  # 分位數窗口 ~1y
 
+# 更嚴格的抓取：若不是 CSV（或第一列不是以 Date, 開頭），就當成錯誤
 def fetch_csv(url, tries=3, timeout=20):
+    import requests, time
     last_err = None
     for k in range(tries):
         try:
             r = requests.get(url, timeout=timeout)
-            ct = r.headers.get("Content-Type","").lower()
+            ct = (r.headers.get("Content-Type") or "").lower()
             txt = r.text
-            # 只接受 CSV；若像 text/html 或開頭是 <html 就拒收
-            if "text/csv" in ct or txt[:128].lstrip().lower().startswith("date,"):
+            if "text/csv" in ct or txt.lstrip().lower().startswith("date,"):
                 return txt
-            last_err = f"unexpected content-type={ct} (first chars: {txt[:40]!r})"
+            last_err = f"unexpected content-type={ct}; head={txt[:60]!r}"
         except Exception as e:
             last_err = str(e)
         time.sleep(2*(k+1))
     raise RuntimeError(f"fetch fail: {last_err} url={url}")
-print(f"[{code}] loaded {len(df)} rows from source")
 
-
+# 更耐髒的中文日期解析：抓出前三個數字（年、月、日），忽略其他字元
 def parse_date_any(s):
-    if pd.isna(s): return None
+    import pandas as pd, re
+    if pd.isna(s): 
+        return None
     x = str(s).strip()
-    m = re.match(r"^\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*$", x)  # 例如 2021年8月11日
+    # 常見中文寫法：2021年8月11日、2021年8月11日 週三、2021年8月11日：…
+    m = re.search(r"(\d{4})\D+(\d{1,2})\D+(\d{1,2})", x)
     if m:
         y, mo, d = map(int, m.groups())
         return f"{y:04d}-{mo:02d}-{d:02d}"
+    # 退而求其次交給 pandas
     try:
-        dt = pd.to_datetime(x, errors="raise", utc=False)
-        return dt.strftime("%Y-%m-%d")
+        return pd.to_datetime(x, errors="raise", utc=False).strftime("%Y-%m-%d")
     except Exception:
         return None
+
+# 在 main() 內，每讀到一個來源就輸出行數，方便你在 Actions 日誌裡確認
+# 找到 for code, url in lines: 那段的開頭，緊接著加上這一行 print：
+# print(f"Fetching {code} ...")
+# 以及讀完 df 後、分支處理前，加上：
+# print(f"[{code}] rows loaded = {len(df)}")
+
+
+
+
 
 def pct_norm(series, window=WINDOW, reverse=False):
     """近 window 天位置分位數 → [-1,1]；USDCNH/VHSI 用 reverse=True 反向"""
