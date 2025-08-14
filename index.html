@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HK20 · Fused Dashboard</title>
+  <style>
+    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;background:#0b0f14;color:#e6edf3;margin:0}
+    header{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid #1f2833}
+    header h1{font-weight:600;font-size:16px;margin:0}
+    .muted{color:#9fb0c1}
+    .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+    .panel{padding:10px 12px;background:#111923;border:1px solid #1f2833;border-radius:10px}
+    label{font-size:12px;margin-right:8px}
+    input[type="number"]{width:64px;background:#0b0f14;border:1px solid #2b3a4a;border-radius:6px;color:#e6edf3;padding:4px 6px}
+    input[type="checkbox"]{transform:translateY(1px)}
+    button{background:#1b88f5;border:0;border-radius:8px;color:white;padding:6px 10px;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid #2b3a4a}
+    #chart{height:520px;width:100%;margin-top:8px}
+    .sliders{display:grid;grid-template-columns:80px 1fr;gap:6px 12px;align-items:center}
+    input[type="range"]{width:100%}
+    .badge{padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid #2b3a4a}
+    .badge.green{background:#153d2b;color:#4ce08a;border-color:#245a3e}
+    .badge.red{background:#3a1a22;color:#ff6b81;border-color:#562431}
+    .badge.range{background:#19202a;color:#9fb0c1}
+  </style>
+  <!-- ECharts（官方建議可直接用 jsDelivr CDN） -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <!-- PapaParse：下載/解析遠端 CSV -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+<header class="row">
+  <h1>HK20 × 5因子（單一工作表）</h1>
+  <span id="statusBadge" class="badge range">Status: Range</span>
+  <span class="muted">資料：GitHub raw CSV</span>
+</header>
+
+<section class="row" style="padding:12px 16px">
+  <div class="panel row" style="gap:12px">
+    <div>
+      <label>閾值：</label>
+      <label>Green ≥ <input id="thGreen" type="number" step="0.1" /></label>
+      <label>Red ≤ <input id="thRed" type="number" step="0.1" /></label>
+      <button id="btnReset" class="ghost">重設</button>
+    </div>
+    <div>
+      <label><input id="chkZones" type="checkbox" /> 顯示分區</label>
+      <label><input id="chkFused" type="checkbox" checked /> 顯示 Fused</label>
+    </div>
+    <div>
+      <button class="ghost" data-q="365">1Y</button>
+      <button class="ghost" data-q="180">6M</button>
+      <button class="ghost" data-q="90">3M</button>
+      <button class="ghost" data-q="30">1M</button>
+      <button class="ghost" data-q="all">全部</button>
+    </div>
+  </div>
+
+  <div class="panel sliders" style="min-width:420px">
+    <label>Start</label><input id="sStart" type="range" min="0" max="100" value="0">
+    <label>Mid</label><input id="sMid"   type="range" min="0" max="100" value="50">
+    <label>End</label><input id="sEnd"   type="range" min="0" max="100" value="100">
+    <small class="muted" style="grid-column:1 / -1">
+      視窗：預設 1M=30 天；不足 30 → 用 n−1；最小視窗=5 天。Mid 只平移，Start/End 會改變視窗長度（會自動夾入界限）。
+    </small>
+  </div>
+</section>
+
+<div id="chart"></div>
+
+<script>
+const FACTORS_URL = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+const STORE_KEY = 'HK20_UI_V1';
+
+const defaults = {
+  thGreen: 0.5,
+  thRed: -0.5,
+  showZones: true,
+  showFused: true
+};
+
+const state = loadState();
+const chart = echarts.init(document.getElementById('chart')); // 官方 API：init 容器返回實例 :contentReference[oaicite:1]{index=1}
+
+initUI();
+loadData();
+
+function loadData(){
+  Papa.parse(FACTORS_URL, {
+    download: true, header: true, dynamicTyping: true,
+    complete: res => {
+      const rows = res.data.filter(r => r.Date && r.Fused_macro !== undefined);
+      const dates = rows.map(r => r.Date);
+      const fused = rows.map(r => Number(r.Fused_macro));
+      // 初始視窗：1M=30天
+      const n = dates.length;
+      const win = Math.max(5, Math.min(30, n-1));
+      setWindow(n - win, n - 1, n);
+      render(dates, fused);
+    }
+  });
+}
+
+// ===== 視覺構建 =====
+
+function render(dates, fused){
+  const {thGreen, thRed, showZones, showFused} = state;
+
+  // 1) 連續區段：≥Green → 綠；≤Red → 紅（用 markArea 畫背景區塊）  :contentReference[oaicite:2]{index=2}
+  const zones = (showZones? buildZones(dates, fused, thGreen, thRed) : []);
+
+  // 2) dot：Amber := 穿越 +0.3；Red := 穿越 -0.5（你可改）
+  const amberDots = [], redDots = [];
+  const AMBER = 0.3, RED = thRed;
+  for (let i=1;i<fused.length;i++){
+    if (fused[i-1] < AMBER && fused[i] >= AMBER) amberDots.push([dates[i], fused[i]]);
+    if (fused[i-1] > RED && fused[i] <= RED)     redDots.push([dates[i], fused[i]]);
+  }
+
+  // 狀態徽章（按照 Fused 當前值）
+  const last = fused[fused.length-1];
+  setBadge(last, thGreen, thRed);
+
+  const series = [];
+  if (showFused){
+    series.push({
+      name:'Fused', type:'line', data: dates.map((d,i)=>[d, fused[i]]),
+      showSymbol:false, smooth:0.15, lineStyle:{width:2}
+    });
+  }
+  series.push(
+    { name:'Amber', type:'scatter', data: amberDots, symbolSize:8,
+      itemStyle:{color:'#f5a524'} },
+    { name:'Risk',  type:'scatter', data: redDots,   symbolSize:8,
+      itemStyle:{color:'#ff6b81'} }
+  );
+
+  const option = {
+    backgroundColor:'#0b0f14',
+    tooltip:{trigger:'axis'},
+    grid:{left:40,right:20,top:12,bottom:60},
+    xAxis:{type:'category', data:dates, axisLine:{lineStyle:{color:'#2b3a4a'}}},
+    yAxis:{type:'value', axisLine:{lineStyle:{color:'#2b3a4a'}},
+           splitLine:{lineStyle:{color:'#1f2833'}}, min:-1, max:1},
+    dataZoom:[
+      {type:'inside', xAxisIndex:0},                   // 支援滑輪/手勢縮放  :contentReference[oaicite:3]{index=3}
+      {type:'slider', xAxisIndex:0, bottom:20, height:18}
+    ],
+    visualMap: null,
+    series,
+    // 背景分區
+    markArea:{}, // 佔位
+  };
+
+  // 用 graphic 方案或 series.markArea；這裡直接用 series[0].markArea 方便
+  if (showZones && series.length>0){
+    series[0].markArea = {itemStyle:{opacity:0.2}, data: zones};
+  }
+
+  chart.setOption(option, true);
+
+  // 同步三滑桿與 dataZoom
+  syncSlidersWithChart(dates.length);
+  chart.on('datazoom', ()=> syncSlidersFromZoom(dates.length));
+}
+
+function buildZones(dates, fused, g, r){
+  // 回傳 [[{xAxis: startDate},{xAxis:endDate}], ...]
+  const res = [];
+  let cur=null; // {color, startIdx}
+  function push(endIdx){
+    if (!cur) return;
+    res.push([{xAxis:dates[cur.start]}, {xAxis:dates[endIdx], itemStyle:{color:cur.color}}]);
+    cur=null;
+  }
+  for (let i=0;i<fused.length;i++){
+    const v=fused[i];
+    const tag = (v>=g)? 'G' : (v<=r? 'R':'N');
+    const color = tag==='G'? '#4ce08a' : tag==='R'? '#ff6b81' : null;
+    if (!color){ if(cur) push(i-1); continue; }
+    if (!cur) cur={color, start:i};
+    else if (color!==cur.color){ push(i-1); cur={color, start:i}; }
+  }
+  if(cur) push(fused.length-1);
+  return res;
+}
+
+// ===== UI / 本地保存 =====
+function initUI(){
+  const $ = id => document.getElementById(id);
+  $('#thGreen').value = state.thGreen;
+  $('#thRed').value   = state.thRed;
+  $('#chkZones').checked = state.showZones;
+  $('#chkFused').checked = state.showFused;
+
+  $('#thGreen').oninput = e => { state.thGreen=+e.target.value; saveState(); reload(); };
+  $('#thRed').oninput   = e => { state.thRed=+e.target.value; saveState(); reload(); };
+  $('#chkZones').onchange= e => { state.showZones=e.target.checked; saveState(); reload(); };
+  $('#chkFused').onchange= e => { state.showFused=e.target.checked; saveState(); reload(); };
+  document.querySelectorAll('button[data-q]').forEach(b=>{
+    b.onclick=()=> quickWindow(b.dataset.q);
+  });
+  document.getElementById('btnReset').onclick=()=>{
+    Object.assign(state, defaults); saveState(); location.reload();
+  };
+}
+
+function reload(){ loadData(); }
+
+function loadState(){
+  try{
+    const s = JSON.parse(localStorage.getItem(STORE_KEY)||'{}');
+    return {...defaults, ...s};
+  }catch(_){ return {...defaults}; }
+}
+function saveState(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+
+function setBadge(last, g, r){
+  const el = document.getElementById('statusBadge');
+  el.className='badge range'; el.textContent='Status: Range';
+  if (last>=g){ el.className='badge green'; el.textContent='Status: Green'; }
+  else if (last<=r){ el.className='badge red'; el.textContent='Status: Red'; }
+}
+
+// ===== 三滑桿 & 視窗控制 =====
+function setWindow(startIdx, endIdx, n){
+  // 把 index 轉成 dataZoom 百分比
+  const start = Math.max(0, Math.min(startIdx, n-5));
+  const end   = Math.max(start+4, Math.min(endIdx, n-1));
+  const startPct = 100 * start/(n-1);
+  const endPct   = 100 * end/(n-1);
+  chart.dispatchAction({type:'dataZoom', start: startPct, end: endPct});
+  syncSlidersWithChart(n);
+}
+
+function syncSlidersWithChart(n){
+  const dz = chart.getOption().dataZoom[1]; // slider
+  const s = document.getElementById('sStart');
+  const m = document.getElementById('sMid');
+  const e = document.getElementById('sEnd');
+  const startIdx = Math.round((dz.start/100)*(n-1));
+  const endIdx   = Math.round((dz.end/100)*(n-1));
+  const midIdx   = Math.round((startIdx+endIdx)/2);
+  s.value = Math.round(dz.start);
+  e.value = Math.round(dz.end);
+  m.value = Math.round(100*midIdx/(n-1));
+
+  // 綁事件
+  s.oninput = ()=> setWindowIdx(Math.round(s.value*(n-1)/100), endIdx, n);
+  e.oninput = ()=> setWindowIdx(startIdx, Math.round(e.value*(n-1)/100), n);
+  m.oninput = ()=>{
+    const len = endIdx-startIdx;
+    const mid = Math.round(m.value*(n-1)/100);
+    const sIdx = Math.max(0, Math.min(mid - Math.floor(len/2), n-5));
+    const eIdx = Math.min(n-1, sIdx + len);
+    setWindowIdx(sIdx, eIdx, n);
+  };
+}
+function syncSlidersFromZoom(n){
+  // 當使用者拖 dataZoom 時，同步三滑桿
+  syncSlidersWithChart(n);
+}
+function setWindowIdx(sIdx, eIdx, n){ setWindow(sIdx, eIdx, n); }
+function quickWindow(q){
+  const n = chart.getOption().xAxis[0].data.length;
+  if (q === 'all'){ setWindow(0, n-1, n); return; }
+  const d = parseInt(q,10);
+  const win = Math.max(5, Math.min(d, n-1));
+  setWindow(n-win, n-1, n);
+}
+</script>
+</body>
+</html>
