@@ -12,6 +12,28 @@ W_MACRO = {"HSI":28, "HSTECH":22, "BTC":15, "USDCNH":20, "VHSI":15}
 W_EQUAL = {"HSI":20, "HSTECH":20, "BTC":20, "USDCNH":20, "VHSI":20}
 WINDOW = 252  # 分位數窗口 ~1y
 
+- name: Checkout
+  uses: actions/checkout@v4
+  with:
+    fetch-depth: 0   # 拉齊完整歷史
+- name: Commit outputs
+  run: |
+    git config user.name "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    # 避免 "fetch first"：先同步遠端再推
+    git fetch origin
+    git pull --rebase --autostash origin ${{ github.ref_name }} || true
+
+    git add -A
+    # 只在有已暫存變更時才 commit + push
+    if ! git diff --staged --quiet; then
+      git commit -m "auto: update data CSVs"
+      git push
+    else
+      echo "No changes to commit."
+    fi
+
 
 for p in {os.path.dirname(OUT_FACTORS), os.path.dirname(OUT_HK20)}:
     if os.path.exists(p) and not os.path.isdir(p):
