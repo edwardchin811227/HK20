@@ -12,6 +12,12 @@ W_MACRO = {"HSI":28, "HSTECH":22, "BTC":15, "USDCNH":20, "VHSI":15}
 W_EQUAL = {"HSI":20, "HSTECH":20, "BTC":20, "USDCNH":20, "VHSI":20}
 WINDOW = 252  # 分位數窗口 ~1y
 
+
+for p in {os.path.dirname(OUT_FACTORS), os.path.dirname(OUT_HK20)}:
+    if os.path.exists(p) and not os.path.isdir(p):
+        raise RuntimeError(f"'{p}' exists but is a file – please delete or rename it.")
+    os.makedirs(p, exist_ok=True)
+
 def fetch_csv(url, tries=3, timeout=20):
     last_err = None
     for k in range(tries):
@@ -150,3 +156,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
