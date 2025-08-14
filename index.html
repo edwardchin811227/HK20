@@ -73,12 +73,17 @@
 /* ========= 1) 多源輪詢（先 jsDelivr，後 raw） =========
    註：PapaParse 可直接下載遠端 CSV（download:true），這是官方支援用法。:contentReference[oaicite:1]{index=1}
 */
+// 來源優先序：GitHub Pages → jsDelivr → raw，全部都加 ?v=timestamp 避 CDN/瀏覽器 Cache
+const _ts = `?v=${Date.now()}`;
 const SOURCES = [
-  // jsDelivr 會把 GitHub 當 CDN，用於避開 raw 的偶發 CORS/節流
-  'https://cdn.jsdelivr.net/gh/edwardchin811227/HK20@main/data/factors.csv',
-  // 備援：raw（通常也可跨域，但有時會受策略/環境影響） :contentReference[oaicite:2]{index=2}
-  'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv'
+  // 你自己站上的檔（最穩定，同網域無 CORS 問題）
+  'https://edwardchin811227.github.io/HK20/data/factors.csv' + _ts,
+  // jsDelivr（GitHub 的 CDN）
+  'https://cdn.jsdelivr.net/gh/edwardchin811227/HK20@main/data/factors.csv' + _ts,
+  // raw（作為最後備援）
+  'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv' + _ts,
 ];
+
 
 const STORE_KEY = 'HK20_UI_V1';
 const defaults = { thGreen:0.5, thRed:-0.5, showZones:true, showFused:true };
