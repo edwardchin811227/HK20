@@ -56,22 +56,28 @@ def parse_date_any(s):
 
 
 
-def pct_norm(series, window=WINDOW, reverse=False):
-    """近 window 天位置分位數 → [-1,1]；USDCNH/VHSI 用 reverse=True 反向"""
+def pct_norm(series, window=252, reverse=False):
+    """把近 window 天的位置轉成 [-1, 1]。
+       早期不足 30 天 → 用現有 n 天；少於 5 天 → 回傳 NaN。"""
+    vals = pd.to_numeric(series, errors="coerce").values.astype(float)
     out = []
-    vals = series.values.astype(float)
-    n = len(series)
-    for i in range(n):
-        start = max(0, i - window + 1)
-        w = vals[start:i+1]
-        w = w[~np.isnan(w)]
-        if len(w) < min(120, window//2) or np.isnan(vals[i]):
+    for i, v in enumerate(vals):
+        if np.isnan(v):
             out.append(np.nan); continue
-        rank = (w <= vals[i]).sum() / len(w)
-        s = 2*rank - 1
+        avail = i + 1
+        if avail < 5:                    # 最小視窗=5
+            out.append(np.nan); continue
+        eff = 30 if avail < 30 else min(window, avail)   # <30 用 n 天；>=30 用 30 或至多 window
+        w = vals[i - eff + 1 : i + 1]
+        w = w[~np.isnan(w)]
+        if len(w) < 5:
+            out.append(np.nan); continue
+        rank = (w <= v).sum() / len(w)   # 分位數
+        s = 2 * rank - 1                 # 映射至 [-1, 1]
         if reverse: s = -s
         out.append(s)
     return pd.Series(out, index=series.index, dtype=float)
+
 
 def norm_weights(d):
     items = [(k, float(v)) for k,v in d.items() if v is not None and float(v) != 0.0]
@@ -86,7 +92,9 @@ def fused(df_norm, weights):
         col = f"{fac}_norm"
         if col in df_norm.columns and fac in w:
             tmp[col] = df_norm[col] * w[fac]
-    return tmp.sum(axis=1, skipna=True) if not tmp.empty else pd.Series(np.nan, index=df_norm.index)
+    # 全是 NaN 時回傳 NaN（不是 0）
+    return tmp.sum(axis=1, skipna=True, min_count=1) if not tmp.empty else pd.Series(np.nan, index=df_norm.index)
+
 
 def main():
     if not os.path.exists(SRC_FILE):
