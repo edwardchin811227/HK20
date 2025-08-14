@@ -149,12 +149,15 @@ def main():
     # factors.csv：含 *_norm 與 Fused
     if factors_df is not None:
         df = factors_df.sort_values("Date").reset_index(drop=True)
-        N = pd.DataFrame({"Date": df["Date"]})
-        N["HSI_norm"]    = pct_norm(df["HSI"])
-        N["HSTECH_norm"] = pct_norm(df["HSTECH"])
-        N["USDCNH_norm"] = pct_norm(df["USDCNH"], reverse=True)
-        N["VHSI_norm"]   = pct_norm(df["VHSI"], reverse=True)
-        N["BTC_norm"]    = pct_norm(df["BTC"])
+    N = pd.DataFrame({"Date": df["Date"]})
+N["HSI_norm"]    = pct_norm(df["HSI"])
+N["HSTECH_norm"] = pct_norm(df["HSTECH"])
+N["USDCNH_norm"] = pct_norm(df["USDCNH"], reverse=True)
+N["VHSI_norm"]   = pct_norm(df["VHSI"], reverse=True)
+N["BTC_norm"]    = pct_norm(df["BTC"])
+print("non-null counts:", {c: int(N[c].count()) for c in ["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"]})
+print(N[["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"]].head(10).to_string(index=False))
+
 
         F_macro = fused(N.set_index("Date"), W_MACRO).rename("Fused_macro")
         F_equal = fused(N.set_index("Date"), W_EQUAL).rename("Fused_equal")
