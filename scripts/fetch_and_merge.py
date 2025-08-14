@@ -12,34 +12,6 @@ W_MACRO = {"HSI":28, "HSTECH":22, "BTC":15, "USDCNH":20, "VHSI":15}
 W_EQUAL = {"HSI":20, "HSTECH":20, "BTC":20, "USDCNH":20, "VHSI":20}
 WINDOW = 252  # 分位數窗口 ~1y
 
-- name: Checkout
-  uses: actions/checkout@v4
-  with:
-    fetch-depth: 0   # 拉齊完整歷史
-- name: Commit outputs
-  run: |
-    git config user.name "github-actions[bot]"
-    git config user.email "github-actions[bot]@users.noreply.github.com"
-
-    # 避免 "fetch first"：先同步遠端再推
-    git fetch origin
-    git pull --rebase --autostash origin ${{ github.ref_name }} || true
-
-    git add -A
-    # 只在有已暫存變更時才 commit + push
-    if ! git diff --staged --quiet; then
-      git commit -m "auto: update data CSVs"
-      git push
-    else
-      echo "No changes to commit."
-    fi
-
-
-for p in {os.path.dirname(OUT_FACTORS), os.path.dirname(OUT_HK20)}:
-    if os.path.exists(p) and not os.path.isdir(p):
-        raise RuntimeError(f"'{p}' exists but is a file – please delete or rename it.")
-    os.makedirs(p, exist_ok=True)
-
 def fetch_csv(url, tries=3, timeout=20):
     last_err = None
     for k in range(tries):
@@ -56,12 +28,10 @@ def fetch_csv(url, tries=3, timeout=20):
 def parse_date_any(s):
     if pd.isna(s): return None
     x = str(s).strip()
-    # 例如 2021年8月11日
-    m = re.match(r"^\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*$", x)
+    m = re.match(r"^\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*$", x)  # 例如 2021年8月11日
     if m:
         y, mo, d = map(int, m.groups())
         return f"{y:04d}-{mo:02d}-{d:02d}"
-    # 其他格式交給 pandas
     try:
         dt = pd.to_datetime(x, errors="raise", utc=False)
         return dt.strftime("%Y-%m-%d")
@@ -128,12 +98,10 @@ def main():
         df["Date"] = pd.to_datetime(df["Date"])
 
         if code == "FACTORS":
-            # 期望：Date, HSI, HSTECH, USDCNH, VHSI, BTC
             for c in ["HSI","HSTECH","USDCNH","VHSI","BTC"]:
                 if c not in df.columns: df[c] = np.nan
             factors_df = df[["Date","HSI","HSTECH","USDCNH","VHSI","BTC"]].copy()
         else:
-            # 個股：Date, Close
             close_col = "Close" if "Close" in df.columns else df.columns[1]
             s = df[["Date", close_col]].rename(columns={close_col: code})
             stocks[code] = s
@@ -178,4 +146,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
