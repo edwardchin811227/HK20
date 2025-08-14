@@ -1,3 +1,21 @@
 FACTORS, https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1962618135
 00700,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1361803881
-
+09988,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1374161717
+03690,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=237361273
+01024,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1640995641
+01810,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=148317544
+09618,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1920724802
+00388,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1920724802
+02318,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=78234286
+03988,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1420850916
+00939,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1350542650
+09888,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=21209291
+00005,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1226474041
+01211,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=167421362
+09999,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1033376982
+09626,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1165018627
+09961,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=712964135
+01398,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1824392267
+00857,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1633387172
+00883,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1470559862
+00981,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=262039719
