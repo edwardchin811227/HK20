@@ -155,8 +155,14 @@ async function loadFactors(url){
   const hint=document.getElementById('loadHint'); hint.style.display='inline';
   try{
     const bust=(url.includes('?')?'&':'?') + 't=' + Date.now();
-    const res=await fetch(url + bust);
-    if(!res.ok) throw new Error('HTTP '+res.status);
+    let res;
+    try{
+      res = await fetch(url + bust);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+    }catch(err){
+      res = await fetch('https://cors.isomorphic-git.org/' + url + bust);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+    }
     const text=await res.text();
     const parsed=parseCSV(text);
     factorsSeries=seriesFromCsv(parsed);
