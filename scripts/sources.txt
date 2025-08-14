@@ -1,2 +1,3 @@
-FACTORS, https://docs.google.com/spreadsheets/d/e/2PACX-1vRWwBu0OBPdKNBOgEkHe31yFFYdkrmRRvc-kBspAuIADJH_5MfA0vca9JTrCptZfd48JMJe3ktYMUsX/pub?gid=1962618135&single=true&output=csv
-00700,   https://docs.google.com/spreadsheets/d/e/2PACX-1vRWwBu0OBPdKNBOgEkHe31yFFYdkrmRRvc-kBspAuIADJH_5MfA0vca9JTrCptZfd48JMJe3ktYMUsX/pub?gid=1361803881&single=true&output=csv
+FACTORS, https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1962618135
+00700,   https://docs.google.com/spreadsheets/d/1o3KalAGpVQxe1msLJEPe8HaIPwOnA7hSOQ4woPtHfGE/export?format=csv&gid=1361803881
+
