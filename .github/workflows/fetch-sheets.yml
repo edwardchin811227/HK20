@@ -31,10 +31,15 @@ jobs:
         run: |
           python scripts/fetch_and_merge.py
 
-      - name: Commit outputs
+           - name: Commit outputs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/factors.csv data/hk20.csv || true
-          git diff --quiet -- data || git commit -m "auto: update data CSVs"
-          git push
+          git add -A
+          # 用「已暫存」變更判斷（或比較 HEAD）
+          if ! git diff --staged --quiet; then
+            git commit -m "auto: update data CSVs"
+            git push
+          else
+            echo "No changes to commit."
+          fi
