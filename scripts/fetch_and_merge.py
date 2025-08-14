@@ -147,33 +147,33 @@ def main():
         print("No stock sources in sources.txt")
 
     # factors.csv：含 *_norm 與 Fused
-    if factors_df is not None:
-        df = factors_df.sort_values("Date").reset_index(drop=True)
+if factors_df is not None:
+    df = factors_df.sort_values("Date").reset_index(drop=True)
+
+    # --- 標準化（最小視窗=5；<30 天用當下 n 天；>=30 用 30～window） ---
     N = pd.DataFrame({"Date": df["Date"]})
-N["HSI_norm"]    = pct_norm(df["HSI"])
-N["HSTECH_norm"] = pct_norm(df["HSTECH"])
-N["USDCNH_norm"] = pct_norm(df["USDCNH"], reverse=True)
-N["VHSI_norm"]   = pct_norm(df["VHSI"], reverse=True)
-N["BTC_norm"]    = pct_norm(df["BTC"])
-print("non-null counts:", {c: int(N[c].count()) for c in ["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"]})
-print(N[["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"]].head(10).to_string(index=False))
+    N["HSI_norm"]    = pct_norm(df["HSI"])
+    N["HSTECH_norm"] = pct_norm(df["HSTECH"])
+    N["USDCNH_norm"] = pct_norm(df["USDCNH"], reverse=True)
+    N["VHSI_norm"]   = pct_norm(df["VHSI"], reverse=True)
+    N["BTC_norm"]    = pct_norm(df["BTC"])
 
+    # --- 加權匯總（全 NaN 則回 NaN，不用 0） ---
+    F_macro = fused(N.set_index("Date"), W_MACRO).rename("Fused_macro")
+    F_equal = fused(N.set_index("Date"), W_EQUAL).rename("Fused_equal")
 
-        F_macro = fused(N.set_index("Date"), W_MACRO).rename("Fused_macro")
-        F_equal = fused(N.set_index("Date"), W_EQUAL).rename("Fused_equal")
-
-        out = pd.DataFrame({
-            "Date": df["Date"].dt.strftime("%Y-%m-%d"),
-            "HSI": df["HSI"], "HSTECH": df["HSTECH"], "USDCNH": df["USDCNH"], "VHSI": df["VHSI"], "BTC": df["BTC"],
-            "HSI_norm": N["HSI_norm"], "HSTECH_norm": N["HSTECH_norm"],
-            "USDCNH_norm": N["USDCNH_norm"], "VHSI_norm": N["VHSI_norm"], "BTC_norm": N["BTC_norm"],
-            "Fused_macro": F_macro.values, "Fused_equal": F_equal.values,
-        })
-        os.makedirs(os.path.dirname(OUT_FACTORS), exist_ok=True)
-        out.to_csv(OUT_FACTORS, index=False, float_format="%.6f")
-        print(f"Wrote {OUT_FACTORS} ({len(out)} rows)")
-    else:
-        print("No FACTORS source in sources.txt", file=sys.stderr)
+    out = pd.DataFrame({
+        "Date": df["Date"].dt.strftime("%Y-%m-%d"),
+        "HSI": df["HSI"], "HSTECH": df["HSTECH"], "USDCNH": df["USDCNH"], "VHSI": df["VHSI"], "BTC": df["BTC"],
+        "HSI_norm": N["HSI_norm"], "HSTECH_norm": N["HSTECH_norm"],
+        "USDCNH_norm": N["USDCNH_norm"], "VHSI_norm": N["VHSI_norm"], "BTC_norm": N["BTC_norm"],
+        "Fused_macro": F_macro.values, "Fused_equal": F_equal.values,
+    })
+    os.makedirs(os.path.dirname(OUT_FACTORS), exist_ok=True)
+    out.to_csv(OUT_FACTORS, index=False, float_format="%.6f")
+    print(f"Wrote {OUT_FACTORS} ({len(out)} rows)")
+else:
+    print("No FACTORS source in sources.txt", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
