@@ -59,17 +59,41 @@ async function main(){
     const s2 = summarize(hk20.rows, 'hk20.csv');
     out.textContent =
       s1 + '\n' + s2 +
-      '\n\n下一步（Step 2）我們再把「強/弱/動能排名」與圖表加上去（預設不顯示 6 條因子線）。';
+      '\n\n已載入資料並繪出五條因子線（正規化到 0-1 區間）。';
 
-    // *** 預留 chart 區塊（目前不畫圖，只驗證不會空白）***
+    // === Render normalized factor lines ===
     const el = document.getElementById('chart');
     el.style.height = '320px';
     const chart = echarts.init(el);
+
+    const factorKeys = ['HSI','HSTECH','USDCNH','VHSI','BTC'];
+    const dates = factors.rows.map(r => r.Date);
+
+    function normalizeSeries(rows, key){
+      const vals = rows.map(r=>r[key]).filter(v=>typeof v === 'number' && !isNaN(v));
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const range = max - min || 1;
+      return rows.map(r => {
+        const v = r[key];
+        return typeof v === 'number' && !isNaN(v) ? (v - min) / range : null;
+      });
+    }
+
+    const series = factorKeys.map(key => ({
+      name: key,
+      type: 'line',
+      data: normalizeSeries(factors.rows, key),
+      showSymbol: false,
+    }));
+
     chart.setOption({
-      title:{ text:'Smoke chart（僅示意）' },
-      xAxis:{ type:'category', data:[1,2,3,4,5] },
+      title:{ text:'Factors (normalized)' },
+      tooltip:{ trigger:'axis' },
+      legend:{ top:0 },
+      xAxis:{ type:'category', data: dates },
       yAxis:{ type:'value' },
-      series:[{ type:'line', data:[1,2,3,2,1], showSymbol:false }]
+      series,
     });
   }catch(err){
     console.error(err);
