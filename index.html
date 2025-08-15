@@ -1,620 +1,483 @@
-<!DOCTYPE html>
-<html lang="zh-HK">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>HK20 — 5因子對比（Fused + RS）</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HK20 · RS + Fused（背景著色 / Amber-Top & Red-Bottom）</title>
 
-<!-- 核心庫 -->
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <!-- ECharts & PapaParse（CDN） -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-<style>
-:root{
-  --bg:#ffffff;--text:#111827;--muted:#6b7280;--border:#e5e7eb;--grid:#d1d5db;
-  --fused:#2563eb;--stock:#16a34a;--stockNeg:#ef4444;
-  --green-bg:rgba(16,185,129,.10); /* 更淺：避免與線衝突 */
-  --range-bg:rgba(148,163,184,.10);
-  --red-bg:rgba(239,68,68,.12);
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
-.wrap{max-width:1280px;margin:0 auto}
-.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff;z-index:2}
-.badge{padding:2px 10px;border:1px solid var(--border);border-radius:999px;font-weight:700}
-.status.green{color:#065f46;background:#d1fae5;border-color:#a7f3d0}
-.status.range{color:#334155;background:#e2e8f0;border-color:#cbd5e1}
-.status.red{color:#991b1b;background:#fee2e2;border-color:#fecaca}
-.btns button{padding:4px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer}
-.btns button.active{background:#111827;color:#fff;border-color:#111827}
-.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:8px 12px}
-fieldset{border:1px dashed var(--border);padding:6px 10px;border-radius:10px}
-legend{padding:0 6px;color:#374151}
-small.hint{color:#6b7280}
-.selects{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-select{padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:180px}
-.checkbox{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.checkbox label{display:flex;gap:6px;align-items:center}
-.src{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto}
-.src input[type=url]{width:460px;max-width:70vw;padding:6px 8px;border:1px solid var(--border);border-radius:8px}
-.src button{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer}
-.note{color:#64748b;font-size:12px}
-.canvas-box{position:relative;margin:12px;height:60vh;min-height:400px;border:1px solid var(--border);border-radius:12px;overflow:hidden}
-#chart{width:100%;height:100%}
-.tooltip{position:fixed;pointer-events:none;background:#111827;color:#fff;padding:8px 10px;border-radius:8px;font-size:12px;opacity:0;transition:opacity .12s;max-width:260px;box-shadow:0 8px 20px rgba(0,0,0,.15)}
-.sliders{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:center;margin:12px}
-.slider{display:flex;align-items:center;gap:8px}
-.slider label{width:46px;text-align:right;color:#374151}
-.slider input[type=range]{flex:1;height:28px;-webkit-appearance:none;background:transparent}
-.slider input[type=range]::-webkit-slider-runnable-track{height:10px;background:#e5e7eb;border-radius:999px}
-.slider input[type=range]::-moz-range-track{height:10px;background:#e5e7eb;border-radius:999px}
-.slider input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;margin-top:-6px;background:#111827;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
-.slider.start input[type=range]::-webkit-slider-thumb{background:#059669}
-.slider.mid   input[type=range]::-webkit-slider-thumb{background:#2563eb}
-.slider.end   input[type=range]::-webkit-slider-thumb{background:#ef4444}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%}
-.dot.amber{background:#f59e0b}.dot.red{background:#ef4444}
-#msg{color:#f59e0b;margin:4px 12px}
-</style>
+  <style>
+    :root {
+      --bg-green: rgba(0, 180, 90, 0.10);
+      --bg-range: rgba(120, 120, 120, 0.05);
+      --bg-red:   rgba(230, 0, 0, 0.10);
+      --rs-blue:  #6a8cff;
+      --fused-orange: #f0a020;
+      --amber: #f0ad4e;
+      --red:   #ff4d4f;
+    }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 10px 12px 40px; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
+    .pill { display:inline-block; padding: 6px 10px; border-radius: 999px; background:#f5f7fa; border:1px solid #e5e7eb; }
+    .ok    { color:#0a0; font-weight:600; }
+    .bad   { color:#c00; font-weight:600; }
+    input[type="number"]{ width:72px; }
+    input[type="text"]{ width:120px; }
+    .chip { border:1px solid #e5e7eb; background:#fafafa; padding:4px 8px; border-radius:999px; cursor:pointer; }
+    .chip.active{ background:#111827; color:white; border-color:#111827; }
+    .help { color:#6b7280; font-size:12px; }
+    #chart { height: 620px; width: 100%; }
+    .right { margin-left:auto; }
+    .source { color:#6b7280; }
+    .inline { display:inline-flex; align-items:center; gap:6px; }
+  </style>
 </head>
+
 <body>
-<div class="wrap">
-  <div class="toolbar">
-    <div id="stateBadge" class="badge">狀態：—</div>
+  <!-- 狀態列 -->
+  <div class="row">
+    <span class="pill">狀態：<span id="state" class="ok">OK</span></span>
 
-    <div class="btns">
-      <button data-win="365">1Y</button>
-      <button data-win="180">6M</button>
-      <button data-win="90">3M</button>
-      <button data-win="30" class="active">1M</button>
-      <button data-win="0" id="btnAll">全部</button>
-    </div>
+    <span class="chip" data-span="12m">1Y</span>
+    <span class="chip active" data-span="6m">6M</span>
+    <span class="chip" data-span="3m">3M</span>
+    <span class="chip" data-span="1m">1M</span>
 
-    <div class="selects">
-      <label>股票：
-        <select id="symbolSelect" multiple size="1" title="可多選，預設單選">
-          <!-- 動態填入 20 檔 -->
-        </select>
-      </label>
-      <label>Fused 權重：
-        <select id="fusedMode">
-          <option value="macro" selected>宏觀權重（Fused_macro）</option>
-          <option value="equal">等權（Fused_equal）</option>
-        </select>
-      </label>
-    </div>
+    <span class="pill">股票：
+      <input id="code" list="codeList" value="00700" />
+      <datalist id="codeList"></datalist>
+    </span>
 
-    <div class="src">
-      <span class="note">資料來源：HK20/data/factors.csv + HK20/data/hk20.csv</span>
-      <button id="btnRefresh">更新</button>
-      <button id="btnReset">重設</button>
-    </div>
+    <span class="pill">Fused 權重：
+      <select id="fusedMode">
+        <option value="Fused_equal">等權（Fused_equal）</option>
+        <option value="Fused_macro">宏觀（Fused_macro）</option>
+      </select>
+    </span>
+
+    <button id="btnRefresh" class="pill">更新</button>
+    <button id="btnReset" class="pill">重設</button>
+
+    <span class="right source help">資料來源：HK20/data/factors.csv + HK20/data/hk20.csv</span>
   </div>
 
-  <div class="controls">
-    <fieldset>
-      <legend>門檻</legend>
-      <label>Green ≥ <input id="thrG" type="number" step="0.01" value="0.5" style="width:70px"></label>
-      <label style="margin-left:8px">Red ≤ <input id="thrR" type="number" step="0.01" value="-0.5" style="width:70px"></label>
-    </fieldset>
-
-    <fieldset>
-      <legend>顯示</legend>
-      <div class="checkbox">
-        <label><input type="checkbox" id="showBG" checked> 背景著色（Green/Range/Red）</label>
-        <label><input type="checkbox" id="showFused" checked> Fused</label>
-        <label><input type="checkbox" id="showRS" checked> RS（相對強弱）</label>
-        <label><input type="checkbox" id="showDots" checked> 風險 Dots（<span class="dot amber"></span> Amber / <span class="dot red"></span> Red）</label>
-        <label><input type="checkbox" id="showNormHSI"> HSI_norm</label>
-        <label><input type="checkbox" id="showNormHSTECH"> HSTECH_norm</label>
-        <label><input type="checkbox" id="showNormUSDCNH"> USDCNH_norm</label>
-        <label><input type="checkbox" id="showNormVHSI"> VHSI_norm</label>
-        <label><input type="checkbox" id="showNormBTC"> BTC_norm</label>
-      </div>
-    </fieldset>
-
-    <div class="checkbox">
-      <label><input type="checkbox" id="kbEnable" checked> 鍵盤微調（←/→ ±1 天，Shift＝±5）</label>
-    </div>
+  <!-- 門檻 -->
+  <div class="row">
+    <div class="pill inline">Green ≥ <input id="thrGreen" type="number" step="0.05" value="0.5" /></div>
+    <div class="pill inline">Red ≤ <input id="thrRed" type="number" step="0.05" value="-0.5" /></div>
+    <div class="help">（可即時調整門檻，背景同步改變）</div>
   </div>
 
-  <div id="msg"></div>
-
-  <div class="canvas-box">
-    <div id="chart"></div>
+  <!-- 顯示選擇 -->
+  <div class="row">
+    <label class="pill"><input type="checkbox" id="showBG" checked /> 背景著色（Green/Range/Red）</label>
+    <label class="pill"><input type="checkbox" id="showFused" checked /> Fused</label>
+    <label class="pill"><input type="checkbox" id="showRS" checked /> RS（相對強弱）</label>
+    <label class="pill"><input type="checkbox" id="showDots" checked /> 風險 Dots（<span style="color:var(--amber)">Amber</span> 上 / <span style="color:var(--red)">Red</span> 下）</label>
+    <label class="pill"><input type="checkbox" id="showBTC" /> BTC_norm</label>
   </div>
 
-  <div class="sliders">
-    <div class="slider start"><label>Start</label><input id="sStart" type="range" min="0" max="100" value="0"></div>
-    <div class="slider mid"><label>Mid</label><input id="sMid" type="range" min="0" max="100" value="50"></div>
-    <div class="slider end"><label>End</label><input id="sEnd" type="range" min="0" max="100" value="100"></div>
-  </div>
-</div>
+  <div class="help">鍵盤微調：←/→ 移動 ±1 天，Shift+←/→ 移動 ±5。</div>
 
-<script>
-/* =========================
-   0) 常量與 DOM 參照
-========================= */
-const FACTORS_PRIMARY = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
-const FACTORS_FALLBACK = FACTORS_PRIMARY; // 如需 Google Sheets CSV，可改這裡
-const HK20_PRIMARY    = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
-const HK20_FALLBACK   = HK20_PRIMARY;
+  <div id="chart"></div>
 
-const el = (id)=>document.getElementById(id);
-const chartEl = el('chart');
-const chart = echarts.init(chartEl);
-const msg = el('msg');
-const stateBadge = el('stateBadge');
-const btns = Array.from(document.querySelectorAll('.btns button'));
-const sStart = el('sStart'), sMid = el('sMid'), sEnd = el('sEnd');
-const thrGInput = el('thrG'), thrRInput = el('thrR');
-const showBG = el('showBG'), showFused = el('showFused'), showRS = el('showRS');
-const showDots = el('showDots');
-const showNormHSI=el('showNormHSI'), showNormHSTECH=el('showNormHSTECH'),
-      showNormUSDCNH=el('showNormUSDCNH'), showNormVHSI=el('showNormVHSI'), showNormBTC=el('showNormBTC');
-const fusedMode = el('fusedMode');
-const symbolSelect = el('symbolSelect');
-/* 視窗狀態（以索引） */
-let ALL_DATES = []; // 全域日期
-let WIN = {start:0, end:0}; // [start, end) 右開區間
+  <script>
+    // ---------------------- 常量與工具 ----------------------
+    const CSV_FACTORS = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+    const CSV_HK20    = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
+    // 同路徑 fallback（用 primary 失敗才試，這裡示意仍指向相同；若你有 mirror，可換掉）
+    const CSV_FACTORS_FALLBACK = CSV_FACTORS;
+    const CSV_HK20_FALLBACK    = CSV_HK20;
 
-/* =========================
-   1) 小工具
-========================= */
-const toNum = (x)=>{ const v = Number(x); return Number.isFinite(v) ? v : NaN; };
+    const el = (id) => document.getElementById(id);
+    const toNum = (x) => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
 
-function parseCSV(text){
-  const res = Papa.parse(text, {header:true, dynamicTyping:true, skipEmptyLines:true});
-  return res.data.filter(r=>r.Date);
-}
-
-async function fetchCSV(url){ const r = await fetch(url, {cache:'no-store'}); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); }
-
-async function loadWithFallback(primary, fallback){
-  try{ return await fetchCSV(primary); }
-  catch(e1){ if (fallback && fallback!==primary) return await fetchCSV(fallback); throw e1; }
-}
-
-function dtKey(s){ return s; } // 已是 YYYY-MM-DD
-
-/* rolling Z-score：對 x 用最近 eff 天（預設 30；不足用 n；最小 5） */
-function rollingZ(x){
-  const out = new Array(x.length).fill(NaN);
-  for (let i=0;i<x.length;i++){
-    const avail = i+1;
-    if (avail<5 || !Number.isFinite(x[i])) continue;
-    const eff = avail<30 ? avail : Math.min(252, avail);
-    let w = x.slice(i-eff+1, i+1).filter(Number.isFinite);
-    if (w.length<5) continue;
-    const mean = w.reduce((a,b)=>a+b,0)/w.length;
-    const sd = Math.sqrt(w.reduce((a,b)=>a+(b-mean)*(b-mean),0)/w.length) || NaN;
-    if (!Number.isFinite(sd) || sd===0) continue;
-    out[i] = (x[i]-mean)/sd;
-  }
-  return out;
-}
-
-/* 回報：log return（相較前一日） */
-function logReturn(arr){
-  const out = new Array(arr.length).fill(NaN);
-  for (let i=1;i<arr.length;i++){
-    const p0 = arr[i-1], p1 = arr[i];
-    if (Number.isFinite(p0) && Number.isFinite(p1) && p0>0 && p1>0){
-      out[i] = Math.log(p1/p0);
-    }
-  }
-  return out;
-}
-
-/* 生成連續區段（用於 markArea 著色） */
-function segmentsByState(dates, fused, thrG, thrR){
-  const segs = [];
-  const labelOf = (s)=> s>=thrG ? 'Green' : (s<=thrR ? 'Red':'Range');
-  let curState=null, segStart=0;
-  for(let i=0;i<dates.length;i++){
-    const st = labelOf(fused[i]);
-    if (curState===null){ curState=st; segStart=i; continue; }
-    if (st!==curState){ // 斷段
-      segs.push({state:curState, i0:segStart, i1:i});
-      curState=st; segStart=i;
-    }
-  }
-  if (curState!==null) segs.push({state:curState, i0:segStart, i1:dates.length-1});
-  return segs;
-}
-
-/* 狀態徽章 */
-function badgeFromVal(v, thrG, thrR){
-  stateBadge.classList.remove('green','red','range');
-  if (!Number.isFinite(v)){ stateBadge.textContent='狀態：—'; return; }
-  if (v>=thrG){ stateBadge.classList.add('status','green'); stateBadge.textContent='狀態：Green'; }
-  else if (v<=thrR){ stateBadge.classList.add('status','red'); stateBadge.textContent='狀態：Red'; }
-  else { stateBadge.classList.add('status','range'); stateBadge.textContent='狀態：Range'; }
-}
-
-/* =========================
-   2) 載入資料
-========================= */
-let FACTORS = null; // {dates:[], fused_macro:[], fused_equal:[], norms:{HSI:[],...}}
-let HK20 = null;    // {dates:[], symbols:[...], map: {SYM: [] }}
-
-async function loadAll(){
-  msg.textContent = '載入中…';
-  // factors
-  const txtF = await loadWithFallback(FACTORS_PRIMARY, FACTORS_FALLBACK);
-  const rowsF = parseCSV(txtF);
-  const datesF = rowsF.map(r=>r.Date);
-  const F_macro = rowsF.map(r=>toNum(r.Fused_macro));
-  const F_equal = rowsF.map(r=>toNum(r.Fused_equal));
-  const norms = {
-    HSI: rowsF.map(r=>toNum(r.HSI_norm)),
-    HSTECH: rowsF.map(r=>toNum(r.HSTECH_norm)),
-    USDCNH: rowsF.map(r=>toNum(r.USDCNH_norm)),
-    VHSI: rowsF.map(r=>toNum(r.VHSI_norm)),
-    BTC: rowsF.map(r=>toNum(r.BTC_norm))
-  };
-  FACTORS = {dates:datesF, fused_macro:F_macro, fused_equal:F_equal, norms};
-
-  // hk20
-  const txtS = await loadWithFallback(HK20_PRIMARY, HK20_FALLBACK);
-  const rowsS = parseCSV(txtS);
-  const datesS = rowsS.map(r=>r.Date);
-  // symbols = 其餘欄位
-  const cols = Object.keys(rowsS[0]||{}).filter(k=>k!=='Date');
-  const map = {};
-  for (const sym of cols){
-    map[sym] = rowsS.map(r=>toNum(r[sym]));
-  }
-  HK20 = {dates:datesS, symbols:cols, map};
-
-  // 對齊日期：以 factors 為主
-  ALL_DATES = FACTORS.dates;
-  WIN.start = 0; WIN.end = ALL_DATES.length; // 初始全域
-  // 填充下拉
-  symbolSelect.innerHTML = '';
-  HK20.symbols.forEach((s,i)=>{
-    const opt = document.createElement('option');
-    opt.value = s; opt.textContent = s;
-    symbolSelect.appendChild(opt);
-  });
-  // 預設單選第一檔
-  if (symbolSelect.options.length){
-    for (const o of symbolSelect.options){ o.selected = false; }
-    symbolSelect.options[0].selected = true;
-    symbolSelect.size = 1; // 顯示單行；你可改 size=6 供多選
-  }
-  // 載入 persisted 設定
-  restoreSettings();
-  msg.textContent = '';
-}
-
-/* =========================
-   3) 計算 RS / 準備繪圖資料
-========================= */
-function sliceByWin(arr){ return arr.slice(WIN.start, WIN.end); }
-function alignedSeries(datesBase, datesOther, arrOther){
-  // 簡單按日期等長對齊（以 factors 日期為主）
-  const idx = new Map(datesOther.map((d,i)=>[d,i]));
-  return datesBase.map(d=>{
-    const j = idx.get(d);
-    return (j==null)? NaN : arrOther[j];
-  });
-}
-
-function buildChartOption(){
-  const thrG = Number(thrGInput.value); const thrR = Number(thrRInput.value);
-  const fusedSel = (fusedMode.value==='equal') ? FACTORS.fused_equal : FACTORS.fused_macro;
-  const dates = ALL_DATES;
-  const fusedAll = fusedSel;
-
-  // Amber/Red dots 位置：用 Fused 值（與主圖同 Y 軸）
-  const amber = []; const red = [];
-  for (let i=0;i<dates.length;i++){
-    const v = fusedAll[i];
-    if (!Number.isFinite(v)) { amber.push([i, null]); red.push([i, null]); continue; }
-    if (v<=thrR) { red.push([i, v]); amber.push([i, null]); }
-    else if (v<thrG && v>thrR) { amber.push([i, v]); red.push([i, null]); }
-    else { amber.push([i, null]); red.push([i, null]); }
-  }
-
-  // RS 計算：r_stock - r_fused 的 rolling Z
-  const r_fused = logReturn(fusedAll);
-  const selected = Array.from(symbolSelect.selectedOptions).map(o=>o.value);
-  const series = [];
-
-  // 背景著色（用 markArea segment）
-  const segs = segmentsByState(dates, fusedAll, thrG, thrR);
-  const markAreas = segs.map(seg=>{
-    const color = seg.state==='Green' ? 'var(--green-bg)' : (seg.state==='Red'?'var(--red-bg)':'var(--range-bg)');
-    return {
-      itemStyle:{color},
-      xAxis: dates[seg.i0],  // 起
-      // 結束要 +1 天，讓區塊覆蓋到 seg.i1
-      // echarts 支援用第二個點定義區段：
+    // 近 N 個月的天數估算
+    const DAYS = {
+      '12m': 365,
+      '6m':  182,
+      '3m':   92,
+      '1m':   31
     };
-  }).flat();
 
-  // Fused 主線
-  if (showFused.checked){
-    series.push({
-      type:'line',
-      name:'Fused',
-      data: fusedAll.map((v,i)=>[dates[i], v]),
-      connectNulls:true, showSymbol:false, smooth:true,
-      lineStyle:{width:2, color:'var(--fused)'},
-      z: 5
-    });
-  }
-
-  // RS 線（每檔）
-  if (showRS.checked && selected.length){
-    for (const sym of selected){
-      const pxAll = alignedSeries(dates, HK20.dates, HK20.map[sym]);
-      const r_sym = logReturn(pxAll);
-      const diff = r_sym.map((v,i)=> (Number.isFinite(v)&&Number.isFinite(r_fused[i])) ? (v - r_fused[i]) : NaN);
-      const rs = rollingZ(diff);
-
-      // 著色：>0 用 stock（綠）；<0 用紅；可拆成兩條 masked 線
-      const pos = rs.map((v,i)=> Number.isFinite(v) && v>0 ? [dates[i], v] : [dates[i], null]);
-      const neg = rs.map((v,i)=> Number.isFinite(v) && v<0 ? [dates[i], v] : [dates[i], null]);
-
-      series.push(
-        {type:'line', name:`RS+ ${sym}`, data:pos, connectNulls:false, showSymbol:false, smooth:true,
-         lineStyle:{width:2, color:'var(--stock)'}, z:6},
-        {type:'line', name:`RS- ${sym}`, data:neg, connectNulls:false, showSymbol:false, smooth:true,
-         lineStyle:{width:2, color:'var(--stockNeg)'}, z:6}
-      );
-    }
-  }
-
-  // *_norm 額外顯示（預設關）
-  const normFlags = {
-    HSI: showNormHSI.checked, HSTECH: showNormHSTECH.checked,
-    USDCNH: showNormUSDCNH.checked, VHSI: showNormVHSI.checked, BTC: showNormBTC.checked
-  };
-  for (const fac of Object.keys(normFlags)){
-    if (!normFlags[fac]) continue;
-    const arr = FACTORS.norms[fac];
-    series.push({
-      type:'line', name:`${fac}_norm`, data: arr.map((v,i)=>[dates[i], v]),
-      connectNulls:true, showSymbol:false, smooth:true,
-      lineStyle:{width:1, type:'dashed'}, z:4
-    });
-  }
-
-  // 風險 Dots（amber / red）
-  if (showDots.checked){
-    series.push(
-      {type:'scatter', name:'Amber', data: amber.map((p,i)=>[dates[i], p[1]]),
-       symbolSize:6, itemStyle:{color:'#f59e0b'}, z:8},
-      {type:'scatter', name:'Red', data: red.map((p,i)=>[dates[i], p[1]]),
-       symbolSize:6, itemStyle:{color:'#ef4444'}, z:8}
-    );
-  }
-
-  // 視窗切片
-  const xAll = dates.slice(WIN.start, WIN.end);
-
-  // 背景 markArea 需要轉成 echarts 的二維區段
-  const markAreaData = [];
-  if (showBG.checked){
-    for (const seg of segs){
-      const i0 = Math.max(seg.i0, WIN.start);
-      const i1 = Math.min(seg.i1, WIN.end-1);
-      if (i1<i0) continue;
-      const color = seg.state==='Green' ? 'var(--green-bg)' : (seg.state==='Red'?'var(--red-bg)':'var(--range-bg)');
-      markAreaData.push([{xAxis: dates[i0]}, {xAxis: dates[i1], itemStyle:{color}}]);
-    }
-  }
-
-  // 狀態徽章（取視窗末日 Fused）
-  const lastV = fusedAll[WIN.end-1];
-  badgeFromVal(lastV, thrG, thrR);
-
-  return {
-    tooltip:{
-      trigger:'axis',
-      axisPointer:{type:'line'},
-      formatter:(params)=>{
-        const d = params[0] && params[0].axisValueLabel || '';
-        const fusedVal = fusedAll[dates.indexOf(d)];
-        let state = '—';
-        if (Number.isFinite(fusedVal)){
-          state = fusedVal>=thrG ? 'Green' : (fusedVal<=thrR ? 'Red' : 'Range');
-        }
-        let lines = [`<div><b>${d}</b></div>`];
-        lines.push(`Fused：${Number.isFinite(fusedVal)? fusedVal.toFixed(3): '—'}（${state}）`);
-        // 顯示 RS（只抓當下第一個選中symbol）
-        const firstRS = params.find(p=>p.seriesName.startsWith('RS+')||p.seriesName.startsWith('RS-'));
-        if (firstRS && Number.isFinite(firstRS.data[1])){
-          lines.push(`RS（相對強弱）：${firstRS.data[1].toFixed(3)}`);
-        }
-        // dots
-        const dotTxt = (fusedVal<=thrR) ? 'Red dot' : (fusedVal<thrG && fusedVal>thrR ? 'Amber dot':'—');
-        if (showDots.checked) lines.push(`風險點：${dotTxt}`);
-        return lines.join('<br/>');
+    // 以「分位數」標準化到 [-1, 1]，minWindow=5，典型 window=60
+    function pctNorm(arr, window = 60) {
+      const out = new Array(arr.length).fill(NaN);
+      const vals = arr.map(v => Number.isFinite(v) ? v : NaN);
+      for (let i = 0; i < vals.length; i++) {
+        const v = vals[i];
+        if (!Number.isFinite(v)) continue;
+        const avail = i + 1;
+        if (avail < 5) continue;
+        const eff = Math.min(window, avail);
+        const w = vals.slice(i - eff + 1, i + 1).filter(Number.isFinite);
+        if (w.length < 5) continue;
+        // 分位數（<= v 的比例），映射到 [-1,1]
+        let rank = 0;
+        for (const t of w) if (t <= v) rank += 1;
+        rank /= w.length;
+        out[i] = 2 * rank - 1;
       }
-    },
-    grid:{left:52,right:28,top:18,bottom:40},
-    xAxis:{type:'category', data: xAll, boundaryGap:false, axisLine:{onZero:false}},
-    yAxis:{type:'value', scale:true, splitLine:{lineStyle:{color:'#e5e7eb'}}},
-    dataZoom:[
-      {type:'inside', start:0, end:100},
-      {type:'slider', height:18}
-    ],
-    series: series.map(s=>{
-      // 視窗切片
-      return {...s, data: s.data.slice(WIN.start, WIN.end)};
-    }),
-    markArea:{
-      silent:true,
-      itemStyle:{opacity:1},
-      data: markAreaData
+      return out;
     }
-  };
-}
 
-/* =========================
-   4) 渲染 / 交互
-========================= */
-function render(){
-  const opt = buildChartOption();
-  chart.setOption(opt, true);
-  saveSettings();
-}
-
-function applyWinByPercent(){
-  // 3 滑桿以百分比對應索引
-  const n = ALL_DATES.length;
-  const iStart = Math.round((sStart.value/100) * (n-1));
-  const iEnd   = Math.round((sEnd.value/100)   * (n-1));
-  let s = Math.max(0, Math.min(iStart, iEnd-1));
-  let e = Math.min(n, Math.max(iStart+1, iEnd));
-  WIN.start = s; WIN.end = e;
-  // Mid 合法範圍檢查
-  const mid = Math.round((sMid.value/100) * (n-1));
-  const winLen = e - s;
-  const minMid = Math.floor(winLen/2);
-  const maxMid = n - Math.ceil(winLen/2);
-  let m = Math.max(minMid, Math.min(mid, maxMid));
-  // 依 mid 重新定位 start/end
-  const half = Math.floor(winLen/2);
-  WIN.start = Math.max(0, m - half);
-  WIN.end   = Math.min(n, WIN.start + winLen);
-}
-
-function updateSlidersFromWin(){
-  const n = ALL_DATES.length, span = (n-1)||1;
-  sStart.value = (WIN.start / span) * 100;
-  sEnd.value   = ((WIN.end-1) / span) * 100;
-  const mid = Math.round((WIN.start + WIN.end -1)/2);
-  sMid.value   = (mid / span) * 100;
-}
-
-function setQuickWindow(days){
-  const n = ALL_DATES.length;
-  if (!n) return;
-  if (days<=0){ WIN.start=0; WIN.end=n; }
-  else {
-    const len = Math.max(5, Math.min(days, n)); // 最小視窗=5
-    WIN.end = n; WIN.start = Math.max(0, n - len);
-  }
-  updateSlidersFromWin();
-  render();
-  btns.forEach(b=>b.classList.toggle('active', Number(b.dataset.win)===days));
-}
-
-/* 鍵盤微調 */
-document.addEventListener('keydown', (e)=>{
-  if(!el('kbEnable').checked) return;
-  const n = ALL_DATES.length;
-  if (!n) return;
-  const step = e.shiftKey ? 5 : 1;
-  if (e.key==='ArrowLeft'){
-    WIN.start = Math.max(0, WIN.start - step);
-    WIN.end   = Math.max(WIN.start+5, WIN.end - step);
-    updateSlidersFromWin(); render();
-  }else if (e.key==='ArrowRight'){
-    WIN.end   = Math.min(n, WIN.end + step);
-    WIN.start = Math.min(WIN.end-5, WIN.start + step);
-    updateSlidersFromWin(); render();
-  }
-});
-
-/* 保存/恢復 設定 */
-function saveSettings(){
-  const set = {
-    thrG: thrGInput.value, thrR: thrRInput.value,
-    showBG: showBG.checked, showFused: showFused.checked, showRS: showRS.checked, showDots: showDots.checked,
-    norms: {HSI:showNormHSI.checked,HSTECH:showNormHSTECH.checked,USDCNH:showNormUSDCNH.checked,VHSI:showNormVHSI.checked,BTC:showNormBTC.checked},
-    fusedMode: fusedMode.value,
-    win: {startDate: ALL_DATES[WIN.start], endDate: ALL_DATES[WIN.end-1]},
-    symbols: Array.from(symbolSelect.selectedOptions).map(o=>o.value)
-  };
-  localStorage.setItem('hk20_ui', JSON.stringify(set));
-}
-
-function restoreSettings(){
-  const raw = localStorage.getItem('hk20_ui');
-  // 預設
-  thrGInput.value = '0.5'; thrRInput.value = '-0.5';
-  showBG.checked = true; showFused.checked = true; showRS.checked = true; showDots.checked = true;
-  showNormHSI.checked=showNormHSTECH.checked=showNormUSDCNH.checked=showNormVHSI.checked=showNormBTC.checked=false;
-  fusedMode.value='macro';
-  setQuickWindow(30);
-
-  if (!raw) { render(); return; }
-  try{
-    const set = JSON.parse(raw);
-    if (set.thrG) thrGInput.value = set.thrG;
-    if (set.thrR) thrRInput.value = set.thrR;
-    if (set.showBG!=null) showBG.checked = set.showBG;
-    if (set.showFused!=null) showFused.checked = set.showFused;
-    if (set.showRS!=null) showRS.checked = set.showRS;
-    if (set.showDots!=null) showDots.checked = set.showDots;
-    if (set.norms){
-      showNormHSI.checked=!!set.norms.HSI; showNormHSTECH.checked=!!set.norms.HSTECH;
-      showNormUSDCNH.checked=!!set.norms.USDCNH; showNormVHSI.checked=!!set.norms.VHSI; showNormBTC.checked=!!set.norms.BTC;
-    }
-    if (set.fusedMode) fusedMode.value = set.fusedMode;
-    // 視窗以日期復原
-    if (set.win && set.win.startDate && set.win.endDate){
-      const i0 = ALL_DATES.indexOf(set.win.startDate);
-      const i1 = ALL_DATES.indexOf(set.win.endDate);
-      if (i0>=0 && i1>=i0){
-        WIN.start = i0; WIN.end = i1+1;
-        updateSlidersFromWin();
+    // 下載 CSV（兩次嘗試，關閉快取）
+    async function fetchCSV(url, fallback) {
+      try {
+        const r = await fetch(url, { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.text();
+      } catch (e) {
+        if (fallback && fallback !== url) {
+          const r = await fetch(fallback, { cache: 'no-store' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return await r.text();
+        }
+        throw e;
       }
     }
-    // 選股
-    if (set.symbols && set.symbols.length){
-      for (const o of symbolSelect.options){ o.selected = set.symbols.includes(o.value); }
-      symbolSelect.size = 1; // 想多選可改成 size=6
+
+    // 解析 csv 為陣列物件
+    function parseCSV(text) {
+      const parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+      return parsed.data;
     }
-  }catch(_){}
-  render();
-}
 
-/* =========================
-   5) 綁定事件
-========================= */
-btns.forEach(b=>{
-  b.addEventListener('click', ()=> setQuickWindow(Number(b.dataset.win)));
-});
-el('btnAll').addEventListener('click', ()=> setQuickWindow(0));
+    // 日期排序 & 去空
+    function cleanDateRows(rows) {
+      return rows
+        .map(r => ({ ...r, Date: String(r.Date).slice(0, 10) }))
+        .filter(r => r.Date && r.Date !== 'undefined')
+        .sort((a, b) => a.Date.localeCompare(b.Date));
+    }
 
-[sStart, sMid, sEnd].forEach(r=>{
-  r.addEventListener('input', ()=>{ applyWinByPercent(); render(); });
-});
+    // 找到第一個皆為有效值的 index
+    function firstValidIndex(arrs) {
+      const n = arrs[0].length;
+      for (let i = 0; i < n; i++) {
+        let ok = true;
+        for (const a of arrs) {
+          const v = a[i];
+          if (!Number.isFinite(v)) { ok = false; break; }
+        }
+        if (ok) return i;
+      }
+      return 0;
+    }
 
-[thrGInput, thrRInput, showBG, showFused, showRS, showDots,
- showNormHSI, showNormHSTECH, showNormUSDCNH, showNormVHSI, showNormBTC,
- fusedMode, symbolSelect].forEach(ctrl=>{
-  ctrl.addEventListener('change', ()=> render());
-});
+    // 背景分段（markArea）：根據 fused 與門檻產生 Green / Range / Red 區段
+    function buildMarkAreas(dates, fused, greenThr, redThr) {
+      const areas = [];
+      const stateOf = (v) => (v >= greenThr ? 'green' : (v <= redThr ? 'red' : 'range'));
+      let curState = null, start = 0;
 
-el('btnRefresh').addEventListener('click', async ()=>{
-  await loadAll(); render();
-});
-el('btnReset').addEventListener('click', ()=>{
-  localStorage.removeItem('hk20_ui');
-  setQuickWindow(30);
-  restoreSettings();
-});
+      for (let i = 0; i < dates.length; i++) {
+        const v = fused[i];
+        const st = Number.isFinite(v) ? stateOf(v) : 'range';
+        if (curState === null) { curState = st; start = i; continue; }
+        if (st !== curState) {
+          areas.push([ start, i - 1, curState ]);
+          curState = st; start = i;
+        }
+      }
+      areas.push([start, dates.length - 1, curState]);
 
-/* =========================
-   6) 啟動
-========================= */
-(async function init(){
-  try{
-    await loadAll();
-    // 初始選 1M
-    setQuickWindow(30);
-  }catch(err){
-    console.error(err);
-    msg.textContent = '讀取失敗：請檢查 data/factors.csv 與 data/hk20.csv 是否可公開讀取。';
-  }
-})();
-</script>
+      const colorOf = (s) =>
+        s === 'green' ? 'var(--bg-green)' :
+        s === 'red'   ? 'var(--bg-red)'   :
+                        'var(--bg-range)';
+
+      return areas.map(([s, e, st]) => ({
+        name: st,
+        itemStyle: { color: colorOf(st) },
+        label: { show: false },
+        emphasis: { disabled: true },
+        data: [[
+          { xAxis: dates[s] },
+          { xAxis: dates[e] }
+        ]]
+      }));
+    }
+
+    // 風險點位（Amber/Red），固定在頂/底
+    function buildRiskDots(dates, fused, greenThr, redThr) {
+      const amberIdx = [];
+      const redIdx = [];
+      const ambSlope = -0.03;   // 綠區中轉弱提示
+      const redSlope = -0.02;   // 紅區續弱提示
+
+      for (let i = 1; i < fused.length; i++) {
+        const f1 = fused[i-1], f2 = fused[i];
+        if (!Number.isFinite(f1) || !Number.isFinite(f2)) continue;
+        const d = f2 - f1;
+
+        // Amber：仍在綠區，但轉弱（跌幅超過門檻）
+        if (f2 >= greenThr && d <= ambSlope) amberIdx.push(i);
+
+        // Red：進入紅區，或在紅區中續弱
+        const crossDownRed = (f1 > redThr && f2 <= redThr);
+        if (crossDownRed || (f2 <= redThr && d <= redSlope)) redIdx.push(i);
+      }
+
+      // 固定頂 / 底（y 值）
+      const TOP =  1.08;
+      const BOT = -1.08;
+      const amber = amberIdx.map(i => [dates[i], TOP]);
+      const red   = redIdx.map(i => [dates[i], BOT]);
+      return { amber, red };
+    }
+
+    // 讀表 + 畫圖
+    let RAW_FACTORS = null;   // factors rows
+    let RAW_HK20    = null;   // hk20 rows
+    let ALL_CODES   = [];     // 可選股票欄位
+
+    const chart = echarts.init(document.getElementById('chart'));
+
+    async function loadAll() {
+      el('state').textContent = '載入中…';
+
+      try {
+        const [txtF, txtS] = await Promise.all([
+          fetchCSV(CSV_FACTORS, CSV_FACTORS_FALLBACK),
+          fetchCSV(CSV_HK20, CSV_HK20_FALLBACK)
+        ]);
+
+        RAW_FACTORS = cleanDateRows(parseCSV(txtF));
+        RAW_HK20    = cleanDateRows(parseCSV(txtS));
+
+        // 產生股票清單
+        if (RAW_HK20.length) {
+          const first = RAW_HK20[0];
+          ALL_CODES = Object.keys(first).filter(k => k !== 'Date');
+          const dl = el('codeList');
+          dl.innerHTML = '';
+          ALL_CODES.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c;
+            dl.appendChild(o);
+          });
+        }
+
+        el('state').textContent = 'OK';
+        draw();
+      } catch (e) {
+        console.error(e);
+        el('state').textContent = '下載失敗';
+        el('state').classList.remove('ok');
+        el('state').classList.add('bad');
+      }
+    }
+
+    function draw() {
+      if (!RAW_FACTORS || !RAW_HK20) return;
+
+      const code = el('code').value.trim();
+      if (!ALL_CODES.includes(code)) {
+        // 找不到就退回第一個
+        if (ALL_CODES.length) el('code').value = ALL_CODES[0];
+      }
+
+      const fusedMode = el('fusedMode').value; // Fused_equal / Fused_macro
+      const showBG    = el('showBG').checked;
+      const showFused = el('showFused').checked;
+      const showRS    = el('showRS').checked;
+      const showDots  = el('showDots').checked;
+      const showBTC   = el('showBTC').checked;
+      const thrG      = Number(el('thrGreen').value);
+      const thrR      = Number(el('thrRed').value);
+
+      // 對齊日期
+      const mapF = new Map(RAW_FACTORS.map(r => [r.Date, r]));
+      const mapS = new Map(RAW_HK20.map(r => [r.Date, r]));
+
+      // 交集日期
+      const allDates = RAW_FACTORS.map(r => r.Date).filter(d => mapS.has(d));
+      allDates.sort((a,b)=>a.localeCompare(b));
+
+      const close = allDates.map(d => toNum(mapS.get(d)[code]));
+      const stockNorm = pctNorm(close, 60);
+
+      const fused = allDates.map(d => {
+        const r = mapF.get(d);
+        const v = toNum(r ? r[fusedMode] : NaN);
+        return Number.isFinite(v) ? v : NaN;
+      });
+
+      // 依序切掉前段無效（確保 RS 連續）
+      const cut = firstValidIndex([stockNorm, fused]);
+      const dates = allDates.slice(cut);
+      const sNorm = stockNorm.slice(cut);
+      const fz    = fused.slice(cut);
+
+      // RS：股票相對 fused（越大代表跑贏）
+      const rs = sNorm.map((v,i) => Number.isFinite(v) && Number.isFinite(fz[i]) ? v - fz[i] : NaN);
+
+      // markArea
+      const markAreas = showBG ? buildMarkAreas(dates, fz, thrG, thrR) : [];
+
+      // 風險點
+      const dots = buildRiskDots(dates, fz, thrG, thrR);
+
+      // 額外參考：BTC_norm（可選）
+      const btc = showBTC
+        ? dates.map(d => {
+            const r = mapF.get(d);
+            return toNum(r ? r.BTC_norm : NaN);
+          })
+        : [];
+
+      // 時間範圍（chips）
+      const activeChip = document.querySelector('.chip.active')?.dataset.span || '6m';
+      const days = DAYS[activeChip] || 182;
+      const startIdx = Math.max(0, dates.length - days);
+
+      // ECharts 設定
+      const series = [];
+
+      if (showFused) {
+        series.push({
+          name: 'Fused',
+          type: 'line',
+          data: fz,
+          xAxisIndex: 0, yAxisIndex: 0,
+          symbol: 'none',
+          connectNulls: true,
+          lineStyle: { width: 2, color: 'var(--fused-orange)', type: 'dashed' },
+          emphasis: { focus: 'series' }
+        });
+      }
+
+      if (showRS) {
+        series.push({
+          name: 'RS',
+          type: 'line',
+          data: rs,
+          xAxisIndex: 0, yAxisIndex: 0,
+          symbol: 'none',
+          connectNulls: true,
+          lineStyle: { width: 2.2, color: 'var(--rs-blue)' },
+          emphasis: { focus: 'series' }
+        });
+      }
+
+      if (showBTC) {
+        series.push({
+          name: 'BTC_norm',
+          type: 'line',
+          data: btc,
+          xAxisIndex: 0, yAxisIndex: 0,
+          symbol: 'none',
+          connectNulls: true,
+          lineStyle: { width: 1.2, color: '#999' },
+          emphasis: { focus: 'series' }
+        });
+      }
+
+      if (showDots) {
+        series.push(
+          {
+            name: 'Amber',
+            type: 'scatter',
+            data: dots.amber,
+            symbol: 'circle',
+            symbolSize: 6,
+            itemStyle: { color: 'var(--amber)' },
+            tooltip: { valueFormatter: _ => 'Amber（風險轉弱）' }
+          },
+          {
+            name: 'Red',
+            type: 'scatter',
+            data: dots.red,
+            symbol: 'circle',
+            symbolSize: 6,
+            itemStyle: { color: 'var(--red)' },
+            tooltip: { valueFormatter: _ => 'Red（跌破 / 續弱）' }
+          }
+        );
+      }
+
+      const option = {
+        tooltip: { trigger: 'axis' },
+        legend: { top: 6 },
+        grid: { left: 50, right: 30, top: 40, bottom: 80 },
+        xAxis: {
+          type: 'category',
+          data: dates,
+          axisLabel: { formatter: (v) => v },
+        },
+        yAxis: {
+          type: 'value',
+          min: -1.2,
+          max:  1.2,
+          splitLine: { show: true }
+        },
+        dataZoom: [
+          { type: 'inside', startValue: dates[startIdx], endValue: dates[dates.length - 1] },
+          { type: 'slider', height: 26, bottom: 40 }
+        ],
+        series: series,
+        // 背景 markArea（放在一條隱形線上）
+        visualMap: [],
+      };
+
+      if (showBG && markAreas.length) {
+        option.series.unshift({
+          name: 'BG',
+          type: 'line',
+          data: fz.map(_ => NaN),
+          symbol: 'none',
+          lineStyle: { width: 0 },
+          markArea: { silent: true, data: markAreas.map(m => m.data[0]), itemStyle: { color: 'var(--bg-range)' } }
+        });
+      }
+
+      chart.setOption(option, true);
+    }
+
+    // ---------------------- 事件 & 快捷 ----------------------
+    // 更新 & 重設
+    el('btnRefresh').addEventListener('click', draw);
+    el('btnReset').addEventListener('click', () => {
+      el('thrGreen').value = 0.5;
+      el('thrRed').value   = -0.5;
+      el('fusedMode').value = 'Fused_equal';
+      draw();
+    });
+
+    // 門檻改變即重繪
+    ['thrGreen','thrRed','showBG','showFused','showRS','showDots','showBTC','fusedMode','code']
+      .forEach(id => el(id).addEventListener('change', draw));
+
+    // 時間 chips
+    document.querySelectorAll('.chip').forEach(c => {
+      c.addEventListener('click', () => {
+        document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+        c.classList.add('active');
+        draw();
+      });
+    });
+
+    // 鍵盤微調：左右移動 dataZoom
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const opt = chart.getOption();
+      if (!opt.dataZoom || !opt.dataZoom.length) return;
+      const dz = opt.dataZoom[0]; // inside
+      const dates = opt.xAxis[0].data;
+      let s = dz.startValue ? dates.indexOf(dz.startValue) : 0;
+      let eidx = dz.endValue ? dates.indexOf(dz.endValue) : dates.length - 1;
+      const step = e.shiftKey ? 5 : 1;
+      if (e.key === 'ArrowLeft') { s = Math.max(0, s - step); eidx = Math.max(s+10, eidx - step); }
+      else                       { s = Math.min(dates.length-11, s + step); eidx = Math.min(dates.length-1, eidx + step); }
+      chart.setOption({ dataZoom: [{ startValue: dates[s], endValue: dates[eidx] }, opt.dataZoom[1]] });
+    });
+
+    // 首次載入
+    loadAll();
+  </script>
 </body>
 </html>
