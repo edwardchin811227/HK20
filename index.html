@@ -1,146 +1,165 @@
-<!-- 先保留你頁面裡的兩條 CDN -->
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<!doctype html>
+<html lang="zh-HK">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HSI 5-Factor — 全系列</title>
 
-<script>
-// ---------- 1) 設定：primary + fallback ----------
-const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
-const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
+  <!-- 必要庫：先行載入，並延後執行 -->
+  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 
-const csvUrl     = document.getElementById('csvUrl');
-const stateBadge = document.getElementById('stateBadge');
-const msg        = document.getElementById('msg') || { textContent:'' };
-csvUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
+  <style>
+    body{margin:0;font:14px/1.5 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    .bar{display:flex;gap:8px;align-items:center;padding:10px;border-bottom:1px solid #e5e7eb}
+    #csvUrl{width:520px;max-width:70vw;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px}
+    button{padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer}
+    #stateBadge{font-weight:700;padding:2px 10px;border:1px solid #e5e7eb;border-radius:999px}
+    #msg{color:#8a2d0a;margin:8px 12px}
+    #chart{height:70vh;min-height:420px;margin:12px}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div id="stateBadge">狀態：—</div>
+    <input id="csvUrl" type="url"
+           placeholder="CSV 連結（預設讀 factors.csv，失敗退回 hk20.csv）" />
+    <button id="btnSaveSrc">儲存連結</button>
+    <button id="btnRefresh">立即更新</button>
+  </div>
+  <div id="msg"></div>
+  <div id="chart"></div>
 
-// 取 CSS 變數做配色（你的 <style> 已定義 --fused / --hsi ...）
-const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  <script>
+  // 等 DOM 準備好再執行，避免找不到元素 → 白屏
+  // 參考：DOMContentLoaded 事件。 
+  // （如果你把這段搬到 <head>，務必保留這個包裝）
+  window.addEventListener('DOMContentLoaded', () => {
 
-// 要顯示的所有序列 + 欄名同義詞
-const SERIES_DEF = [
-  { id:'showFused', name:'Fused',        keys:['Fused_macro','Fused_ma','Fused_equal','Fused'], color: css('--fused') },
-  { id:'showHSI',   name:'HSI_norm',     keys:['HSI_norm','HSI'],                                color: css('--hsi')   },
-  { id:'showHSTE',  name:'HSTECH_norm',  keys:['HSTECH_norm','HSTECH_r','HSTECH'],              color: css('--hste')  },
-  { id:'showCNH',   name:'USDCNH_norm',  keys:['USDCNH_norm','USDCNH_r','USDCNH_','USDCNH'],    color: css('--cnh')   },
-  { id:'showVHSI',  name:'VHSI_norm',    keys:['VHSI_norm','VHSI'],                              color: css('--vhsi')  },
-  { id:'showBTC',   name:'BTC_norm',     keys:['BTC_norm','BTC'],                                color: css('--btc')   },
-];
+    // 1) 來源設定：primary + fallback
+    const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+    const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
 
-const toNum = x => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
+    // 2) 取得必要 DOM
+    const elUrl   = document.getElementById('csvUrl');
+    const elBadge = document.getElementById('stateBadge');
+    const elMsg   = document.getElementById('msg');
 
-// ---------- 2) 載入 + 解析（關閉快取） ----------
-async function loadAndParse(url){
-  const r = await fetch(url, { cache:'no-store' });            // 取新檔，避免瀏覽器舊快取
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-  const text = await r.text();
-  const parsed = Papa.parse(text, {                             // 直接把 CSV 轉成物件陣列
-    header:true, dynamicTyping:true, skipEmptyLines:true
+    // 3) 初始化輸入框（允許自訂來源）
+    elUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
+
+    // 4) 小工具
+    const toNum = x => {
+      const v = Number(x);
+      return Number.isFinite(v) ? v : NaN;
+    };
+
+    // 若 Fused_macro 缺值，改用五個 *_norm 的等權平均
+    function buildFused(rows){
+      let fused = rows.map(r => toNum(r.Fused_macro));
+      if (fused.some(Number.isFinite)) return fused;
+
+      const cols = ["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"];
+      fused = rows.map(r => {
+        const xs = cols.map(c => toNum(r[c])).filter(Number.isFinite);
+        return xs.length ? xs.reduce((a,b)=>a+b, 0)/xs.length : NaN;
+      });
+      return fused;
+    }
+
+    // 5) 載入 + 解析（停用快取避免舊檔）
+    async function loadAndParse(url){
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+      const text = await r.text();
+      const parsed = Papa.parse(text, {
+        header: true, dynamicTyping: true, skipEmptyLines: true
+      });
+      // 去除沒有日期的行
+      return parsed.data.filter(row => row.Date);
+    }
+
+    async function getRows(){
+      try{
+        const rows = await loadAndParse(elUrl.value);
+        elBadge.textContent = '狀態：OK（primary）';
+        return rows;
+      }catch(e1){
+        console.warn('primary 失敗，改試 fallback：', e1);
+        const rows = await loadAndParse(CSV_FALLBACK);
+        elBadge.textContent = '狀態：OK（fallback）';
+        return rows;
+      }
+    }
+
+    // 6) 畫圖（一次放六條線，有值才畫）
+    function renderChart(dates, seriesList){
+      const chart = echarts.init(document.getElementById('chart'));
+      chart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend:  { type: 'scroll' },
+        xAxis:   { type: 'category', data: dates },
+        yAxis:   { type: 'value' },
+        dataZoom:[{ type:'inside' }, { type:'slider' }],
+        series: seriesList
+      });
+    }
+
+    // 7) 主流程
+    async function main(){
+      elMsg.textContent = '';
+      try{
+        const rows  = await getRows();
+        const dates = rows.map(r => r.Date);
+
+        // 準備六條資料（有值才放進圖）
+        const defs = [
+          {key:'Fused_macro', label:'Fused',         data: buildFused(rows)},
+          {key:'HSI_norm',    label:'HSI_norm',      data: rows.map(r => toNum(r.HSI_norm))},
+          {key:'HSTECH_norm', label:'HSTECH_norm',   data: rows.map(r => toNum(r.HSTECH_norm))},
+          {key:'USDCNH_norm', label:'USDCNH_norm',   data: rows.map(r => toNum(r.USDCNH_norm))},
+          {key:'VHSI_norm',   label:'VHSI_norm',     data: rows.map(r => toNum(r.VHSI_norm))},
+          {key:'BTC_norm',    label:'BTC_norm',      data: rows.map(r => toNum(r.BTC_norm))}
+        ];
+
+        // 只保留「至少有一個有效數字」的系列
+        const enabled = defs.filter(d => d.data.some(Number.isFinite));
+        if (!enabled.length){
+          elMsg.textContent = 'CSV 沒有可用數據（Fused 與 *_norm 均為空）。';
+          return;
+        }
+
+        // 找到所有系列共同的第一筆有效索引，避開前段 NaN（例如移動窗尚未滿）
+        const firstIdx = Math.min(
+          ...enabled.map(d => d.data.findIndex(Number.isFinite)).filter(i => i >= 0)
+        );
+
+        const slicedDates = dates.slice(firstIdx);
+        const seriesList  = enabled.map(d => ({
+          type: 'line',
+          name: d.label,
+          data: d.data.slice(firstIdx),
+          connectNulls: true,
+          showSymbol: false
+        }));
+
+        renderChart(slicedDates, seriesList);
+      }catch(err){
+        elBadge.textContent = '狀態：讀取失敗';
+        elMsg.textContent = '讀取或解析失敗，請打開 F12/Console 看錯誤訊息。';
+        console.error(err);
+      }
+    }
+
+    // 8) 控件
+    document.getElementById('btnSaveSrc').addEventListener('click', ()=>{
+      localStorage.setItem('csvUrl', elUrl.value);
+    });
+    document.getElementById('btnRefresh').addEventListener('click', main);
+
+    // 9) 首次載入
+    main();
   });
-  return parsed.data.filter(row => row.Date);                   // 去空行
-}
-
-async function getRows(){
-  try {
-    const rows = await loadAndParse(csvUrl.value);
-    stateBadge.textContent = '狀態：OK（primary）';
-    return rows;
-  } catch (e1) {
-    console.warn('primary 失敗，改試 fallback：', e1);
-    const rows = await loadAndParse(CSV_FALLBACK);
-    stateBadge.textContent = '狀態：OK（fallback）';
-    return rows;
-  }
-}
-
-// ---------- 3) 取欄位工具 & Fused 後備計算 ----------
-function pickColumn(rows, keys){
-  const first = rows[0] || {};
-  const hit = keys.find(k => Object.prototype.hasOwnProperty.call(first, k));
-  if (!hit) return rows.map(() => NaN);
-  return rows.map(r => toNum(r[hit]));
-}
-function makeFusedIfMissing(rows, map){
-  const fused = map['Fused'];
-  if (fused && fused.some(Number.isFinite)) return fused;
-  const h = map['HSI_norm'], t = map['HSTECH_norm'], c = map['USDCNH_norm'],
-        v = map['VHSI_norm'], b = map['BTC_norm'];
-  return rows.map((_, i) => {
-    const xs = [h[i], t[i], c[i], v[i], b[i]].filter(Number.isFinite);
-    return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : NaN;
-  });
-}
-
-// ---------- 4) 組圖 ----------
-const chart = echarts.init(document.getElementById('chart'));
-
-function buildAndRender(rows){
-  const dates = rows.map(r => r.Date);
-
-  // 轉成各序列的資料陣列
-  const seriesMap = {};
-  for (const s of SERIES_DEF) seriesMap[s.name] = pickColumn(rows, s.keys);
-  seriesMap['Fused'] = makeFusedIfMissing(rows, seriesMap);
-
-  // 計算所有「有勾選」序列的共同起始索引（跳過最前段 NaN）
-  const onSeries = SERIES_DEF
-    .filter(s => document.getElementById(s.id)?.checked)
-    .map(s => seriesMap[s.name]);
-  const firstIdx = Math.min(...onSeries
-    .map(arr => arr.findIndex(Number.isFinite))
-    .filter(i => i >= 0));
-  const start = Number.isFinite(firstIdx) ? firstIdx : 0;
-
-  // ECharts option
-  const option = {
-    color: SERIES_DEF.map(s => s.color),
-    tooltip: { trigger:'axis' },
-    legend: {
-      top: 8,
-      selected: Object.fromEntries(SERIES_DEF.map(s => [s.name, document.getElementById(s.id)?.checked]))
-    },
-    xAxis: { type:'category', data: dates.slice(start) },
-    yAxis: { type:'value' },
-    dataZoom: [{ type:'inside' }, { type:'slider' }],
-    series: SERIES_DEF.map(s => ({
-      name: s.name,
-      type: 'line',
-      data: seriesMap[s.name].slice(start),
-      showSymbol: false,
-      connectNulls: true,
-      lineStyle: { width: 2 },
-      itemStyle: { color: s.color },
-      emphasis: { focus: 'series' }
-    }))
-  };
-  chart.setOption(option, true);
-}
-
-// ---------- 5) 主流程與事件 ----------
-let _rows = null;
-
-async function main(){
-  try{
-    msg.textContent = '';
-    if (!_rows) _rows = await getRows();
-    buildAndRender(_rows);
-  }catch(err){
-    stateBadge.textContent = '狀態：讀取失敗';
-    msg.textContent = '讀取或解析失敗，請開 F12 看 console。';
-    console.error(err);
-  }
-}
-
-// 勾選框 → 即時刷新；更新 / 儲存連結 → 重跑
-['showFused','showHSI','showHSTE','showCNH','showVHSI','showBTC'].forEach(id=>{
-  const el = document.getElementById(id);
-  if (el) el.addEventListener('change', () => { if (_rows) buildAndRender(_rows); });
-});
-document.getElementById('btnRefresh')?.addEventListener('click', async ()=>{
-  _rows = null; await main();
-});
-document.getElementById('btnSaveSrc')?.addEventListener('click', ()=>{
-  localStorage.setItem('csvUrl', csvUrl.value);
-});
-
-// 首次載入
-main();
-</script>
+  </script>
+</body>
+</html>
