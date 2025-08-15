@@ -321,7 +321,7 @@ function buildSeries(rows, opt){
     series.push({
       type:'scatter', name:'Amber',
       data: amber, symbolSize:6,
-      itemStyle:{color:getComputedStyle(document.documentElement).getPropertyValue('--amber')},
+      itemStyle:{color:getComputedStyle(document.documentElement).getPropertyValue('--amber').trim()},
       z:4
     });
   }
@@ -329,7 +329,7 @@ function buildSeries(rows, opt){
     series.push({
       type:'scatter', name:'Red',
       data: red, symbolSize:6,
-      itemStyle:{color:getComputedStyle(document.documentElement).getPropertyValue('--red')},
+      itemStyle:{color:getComputedStyle(document.documentElement).getPropertyValue('--red').trim()},
       z:4
     });
   }
