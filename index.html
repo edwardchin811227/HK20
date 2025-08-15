@@ -70,6 +70,8 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
       <select id="wSel">
         <option value="equal">等權（Fused_equal）</option>
         <option value="macro">宏觀（Fused_macro）</option>
+        <option value="aggressive_plus">Aggressive+（Fused_aggressive_plus）</option>
+        <option value="conservative_plus">Conservative+（Fused_conservative_plus）</option>
       </select>
     </div>
 
@@ -206,7 +208,13 @@ function buildSeries(rows, opt){
   const showDots = $('#dotsChk').checked;
 
   // 權重版本
-  const fusedKey = ($('#wSel').value==='macro') ? 'Fused_macro' : 'Fused_equal';
+  const weightMap = {
+    equal: 'Fused_equal',
+    macro: 'Fused_macro',
+    aggressive_plus: 'Fused_aggressive_plus',
+    conservative_plus: 'Fused_conservative_plus'
+  };
+  const fusedKey = weightMap[$('#wSel').value] || 'Fused_equal';
 
   // x 軸
   const dates = rows.map(r => r.Date);
