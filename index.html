@@ -78,6 +78,7 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
     <div class="pill">
       <button id="btnRefresh" class="btn">更新</button>
       <button id="btnReset" class="btn">重設</button>
+      <button id="btnFutu" class="btn">取得行情</button>
     </div>
   </div>
 
@@ -387,6 +388,18 @@ async function main(){
 /* -----------------------------
  * 6) 事件
  * ----------------------------- */
+async function fetchFutu(){
+  const code = 'HK.' + $('#stockSel').value;
+  try{
+    const r = await fetch(`/api/snapshot?code=${code}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    console.log('Futu snapshot', data);
+  }catch(e){
+    console.error('Futu API error', e);
+    alert('無法取得 Futu 資料');
+  }
+}
 $('#btnRefresh').addEventListener('click', main);
 $('#btnReset').addEventListener('click', ()=>{
   $('#thGreen').value = 0.50;
@@ -410,6 +423,8 @@ document.querySelectorAll('#rangeBtns .btn').forEach(btn=>{
     render();
   });
 });
+
+$('#btnFutu').addEventListener('click', fetchFutu);
 
 main();
 </script>
