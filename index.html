@@ -231,6 +231,47 @@ async function loadFromGAS() {
   }
 }
 
+async function loadLocalData() {
+  showLoading(true);
+  showError('');
+  try {
+    const parseCSV = (text) => {
+      const lines = text.trim().split(/\r?\n/);
+      const headers = lines.shift().split(',');
+      return lines.map(line => {
+        const cols = line.split(',');
+        const obj = {};
+        headers.forEach((h,i) => obj[h] = cols[i]);
+        return obj;
+      });
+    };
+
+    const [factTxt, hkTxt] = await Promise.all([
+      fetch('data/factors.csv').then(r => r.text()),
+      fetch('data/hk20.csv').then(r => r.text())
+    ]);
+
+    const factors = parseCSV(factTxt);
+    const rows = parseCSV(hkTxt);
+    const stocks = {};
+    rows.forEach(row => {
+      const d = row.Date;
+      Object.keys(row).forEach(k => {
+        if (k === 'Date') return;
+        if (!stocks[k]) stocks[k] = [];
+        stocks[k].push({ Date: d, Close: row[k] });
+      });
+    });
+    return { factors, stocks, lastUpdate: factors.at(-1)?.Date };
+  } catch (e) {
+    console.error('Error loading local data:', e);
+    showError(`載入本地資料失敗: ${e.message}`);
+    throw e;
+  } finally {
+    showLoading(false);
+  }
+}
+
 /* -----------------------------
  * 3) 主流程
  * ----------------------------- */
@@ -481,8 +522,19 @@ function renderRSStatus(){
 async function main(){
   try {
     console.log('Starting data load from GAS...');
-    const data = await loadFromGAS();
-    
+    let data;
+    try {
+      data = await loadFromGAS();
+    } catch (err) {
+      console.warn('Falling back to local CSV data:', err);
+      data = await loadLocalData();
+      const statusMsg = $('#statusMsg');
+      if (statusMsg) {
+        statusMsg.innerHTML = '<strong>提示：</strong>使用本地資料檔';
+        statusMsg.style.display = 'block';
+      }
+    }
+
     if (data.error) {
       throw new Error(data.message || data.error);
     }
@@ -500,7 +552,6 @@ async function main(){
       render();
       renderRSStatus();
       $('#lastUpdate').textContent = data.lastUpdate || new Date().toLocaleString('zh-HK');
-      showError('');
     } else {
       showError('無合併資料可用');
     }
