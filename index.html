@@ -1,89 +1,18 @@
-<!-- 放在你的 <head> 或本段 JS 之前 -->
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-
-// ---- 1) 設定：primary + fallback ----
-const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
-const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
-
-const csvUrl     = document.getElementById('csvUrl');
-const stateBadge = document.getElementById('stateBadge');
-csvUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
-
-// ---- 2) 小工具 ----
-const toNum = (x) => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
-
-function pickFused(rows){
-  // 先用 Fused_macro；沒有就平均五個 *_norm
-  let fused = rows.map(r => toNum(r.Fused_macro));
-  if (fused.some(Number.isFinite)) return fused;
-  const cols = ["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"];
-  return rows.map(r => {
-    const xs = cols.map(c => toNum(r[c])).filter(Number.isFinite);
-    return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : NaN;
-  });
-}
-
-// ---- 3) 載入 + 解析（關閉快取）----
-async function loadAndParse(url){
-  const r = await fetch(url, { cache: 'no-store' }); // 避免拿到舊快取
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-  const text = await r.text();
-  const parsed = Papa.parse(text, { header:true, dynamicTyping:true, skipEmptyLines:true });
-  return parsed.data.filter(row => row.Date); // 去空行
-}
-
-async function getRows(){
-  try{
-    const rows = await loadAndParse(csvUrl.value);
-    stateBadge.textContent = '狀態：OK（primary）';
-    return rows;
-  }catch(e1){
-    console.warn('primary 失敗，改試 fallback：', e1);
-    const rows = await loadAndParse(CSV_FALLBACK);
-    stateBadge.textContent = '狀態：OK（fallback）';
-    return rows;
-  }
-}
-
-// ---- 4) 繪圖 ----
-function renderChart(dates, y){
-  const chart = echarts.init(document.getElementById('chart'));
-  chart.setOption({
-    tooltip:{trigger:'axis'},
-    xAxis:{type:'category', data:dates},
-    yAxis:{type:'value'},
-    dataZoom:[{type:'inside'},{type:'slider'}],
-    series:[{type:'line', name:'Fused', data:y, connectNulls:true, showSymbol:false}]
-  });
-}
-
-// ---- 5) 主流程 ----
-async function main(){
-  try{
-    const rows  = await getRows();
-    const dates = rows.map(r => r.Date);
-    const fused = pickFused(rows);
-
-    // 跳過視窗未滿造成的前段 NaN
-    const i = fused.findIndex(Number.isFinite);
-    if (i === -1){
-      document.getElementById('msg').textContent = 'CSV 沒有可用數據（Fused / *_norm 全為空）。';
-      return;
-    }
-    renderChart(dates.slice(i), fused.slice(i));
-  }catch(err){
-    stateBadge.textContent = '狀態：讀取失敗';
-    document.getElementById('msg').textContent = '讀取或解析失敗，請開 F12 看 console。';
-    console.error(err);
-  }
-}
-
-// ---- 6) 控件 ----
-document.getElementById('btnSaveSrc').addEventListener('click', ()=>{
-  localStorage.setItem('csvUrl', csvUrl.value);
-});
-document.getElementById('btnRefresh').addEventListener('click', main);
-
-// 首次載入
-main();
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>HK20</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+  <input id="csvUrl" style="width:60%">
+  <button id="btnSaveSrc">Save</button>
+  <button id="btnRefresh">Refresh</button>
+  <span id="stateBadge"></span>
+  <div id="chart" style="width:600px;height:400px;"></div>
+  <div id="msg"></div>
+  <script src="main.js"></script>
+</body>
+</html>
