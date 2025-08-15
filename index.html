@@ -1,134 +1,146 @@
-<!DOCTYPE html>
-<html lang="zh-HK">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>HK20 × 5因子（CSV 直連版）</title>
-  <style>
-    body{margin:0;font:14px/1.55 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}
-    .badge{padding:2px 10px;border:1px solid #e5e7eb;border-radius:999px}
-    .src{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto}
-    .src input[type=url]{width:520px;max-width:72vw;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px}
-    .src button{padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer}
-    #chart{height:66vh;min-height:380px;margin:12px;border:1px solid #e5e7eb;border-radius:12px}
-    #msg{color:#945; margin:8px 12px}
-  </style>
+<!-- 先保留你頁面裡的兩條 CDN -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 
-  <!-- 必要函式庫（放 head 也可，已在 body 結尾初始化） -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-</head>
-<body>
-  <div class="toolbar">
-    <div id="stateBadge" class="badge">狀態：—</div>
-    <div class="src">
-      <input id="csvUrl" type="url" placeholder="可覆蓋預設：貼上你的 CSV 連結" />
-      <button id="btnSaveSrc">儲存連結</button>
-      <button id="btnRefresh">立即更新</button>
-    </div>
-  </div>
+<script>
+// ---------- 1) 設定：primary + fallback ----------
+const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
 
-  <div id="msg"></div>
-  <div id="chart"></div>
+const csvUrl     = document.getElementById('csvUrl');
+const stateBadge = document.getElementById('stateBadge');
+const msg        = document.getElementById('msg') || { textContent:'' };
+csvUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
 
-  <script>
-    // ---- 1) 設定：primary + fallback（都走 GitHub raw，避免 gviz/403）----
-    const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
-    const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
+// 取 CSS 變數做配色（你的 <style> 已定義 --fused / --hsi ...）
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-    // 介面元素
-    const csvUrl     = document.getElementById('csvUrl');
-    const stateBadge = document.getElementById('stateBadge');
-    const msgBox     = document.getElementById('msg');
+// 要顯示的所有序列 + 欄名同義詞
+const SERIES_DEF = [
+  { id:'showFused', name:'Fused',        keys:['Fused_macro','Fused_ma','Fused_equal','Fused'], color: css('--fused') },
+  { id:'showHSI',   name:'HSI_norm',     keys:['HSI_norm','HSI'],                                color: css('--hsi')   },
+  { id:'showHSTE',  name:'HSTECH_norm',  keys:['HSTECH_norm','HSTECH_r','HSTECH'],              color: css('--hste')  },
+  { id:'showCNH',   name:'USDCNH_norm',  keys:['USDCNH_norm','USDCNH_r','USDCNH_','USDCNH'],    color: css('--cnh')   },
+  { id:'showVHSI',  name:'VHSI_norm',    keys:['VHSI_norm','VHSI'],                              color: css('--vhsi')  },
+  { id:'showBTC',   name:'BTC_norm',     keys:['BTC_norm','BTC'],                                color: css('--btc')   },
+];
 
-    // 輸入框預設 = 上次儲存 || primary
-    csvUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
+const toNum = x => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
 
-    // ---- 2) 小工具 ----
-    const toNum = (x) => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
+// ---------- 2) 載入 + 解析（關閉快取） ----------
+async function loadAndParse(url){
+  const r = await fetch(url, { cache:'no-store' });            // 取新檔，避免瀏覽器舊快取
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+  const text = await r.text();
+  const parsed = Papa.parse(text, {                             // 直接把 CSV 轉成物件陣列
+    header:true, dynamicTyping:true, skipEmptyLines:true
+  });
+  return parsed.data.filter(row => row.Date);                   // 去空行
+}
 
-    function pickFused(rows){
-      // 先用 Fused_macro；如果整列都是空，再退化成等權平均五個 *_norm
-      let fused = rows.map(r => toNum(r.Fused_macro));
-      if (fused.some(Number.isFinite)) return fused;
+async function getRows(){
+  try {
+    const rows = await loadAndParse(csvUrl.value);
+    stateBadge.textContent = '狀態：OK（primary）';
+    return rows;
+  } catch (e1) {
+    console.warn('primary 失敗，改試 fallback：', e1);
+    const rows = await loadAndParse(CSV_FALLBACK);
+    stateBadge.textContent = '狀態：OK（fallback）';
+    return rows;
+  }
+}
 
-      const cols = ["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"];
-      return rows.map(r => {
-        const xs = cols.map(c => toNum(r[c])).filter(Number.isFinite);
-        return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : NaN;
-      });
-    }
+// ---------- 3) 取欄位工具 & Fused 後備計算 ----------
+function pickColumn(rows, keys){
+  const first = rows[0] || {};
+  const hit = keys.find(k => Object.prototype.hasOwnProperty.call(first, k));
+  if (!hit) return rows.map(() => NaN);
+  return rows.map(r => toNum(r[hit]));
+}
+function makeFusedIfMissing(rows, map){
+  const fused = map['Fused'];
+  if (fused && fused.some(Number.isFinite)) return fused;
+  const h = map['HSI_norm'], t = map['HSTECH_norm'], c = map['USDCNH_norm'],
+        v = map['VHSI_norm'], b = map['BTC_norm'];
+  return rows.map((_, i) => {
+    const xs = [h[i], t[i], c[i], v[i], b[i]].filter(Number.isFinite);
+    return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : NaN;
+  });
+}
 
-    // ---- 3) 載入 + 解析（關閉快取，避免吃到舊檔）----
-    async function loadAndParse(url){
-      const r = await fetch(url, { cache: 'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-      const text = await r.text();
-      const parsed = Papa.parse(text, {
-        header: true, dynamicTyping: true, skipEmptyLines: true
-      });
-      // 只留有日期的列
-      return parsed.data.filter(row => row.Date);
-    }
+// ---------- 4) 組圖 ----------
+const chart = echarts.init(document.getElementById('chart'));
 
-    async function getRows(){
-      try{
-        const rows = await loadAndParse(csvUrl.value);
-        stateBadge.textContent = '狀態：OK（primary）';
-        return rows;
-      }catch(e1){
-        console.warn('primary 失敗，改試 fallback：', e1);
-        const rows = await loadAndParse(CSV_FALLBACK);
-        stateBadge.textContent = '狀態：OK（fallback）';
-        return rows;
-      }
-    }
+function buildAndRender(rows){
+  const dates = rows.map(r => r.Date);
 
-    // ---- 4) 繪圖 ----
-    function renderChart(dates, y){
-      const chart = echarts.init(document.getElementById('chart'));
-      chart.setOption({
-        tooltip:{trigger:'axis'},
-        xAxis:{type:'category', data:dates},
-        yAxis:{type:'value'},
-        dataZoom:[{type:'inside'},{type:'slider'}],
-        series:[{type:'line', name:'Fused', data:y, connectNulls:true, showSymbol:false}]
-      });
-      window.addEventListener('resize', () => chart.resize());
-    }
+  // 轉成各序列的資料陣列
+  const seriesMap = {};
+  for (const s of SERIES_DEF) seriesMap[s.name] = pickColumn(rows, s.keys);
+  seriesMap['Fused'] = makeFusedIfMissing(rows, seriesMap);
 
-    // ---- 5) 主流程 ----
-    async function main(){
-      try{
-        msgBox.textContent = '';
-        const rows  = await getRows();
-        const dates = rows.map(r => r.Date);
-        const fused = pickFused(rows);
+  // 計算所有「有勾選」序列的共同起始索引（跳過最前段 NaN）
+  const onSeries = SERIES_DEF
+    .filter(s => document.getElementById(s.id)?.checked)
+    .map(s => seriesMap[s.name]);
+  const firstIdx = Math.min(...onSeries
+    .map(arr => arr.findIndex(Number.isFinite))
+    .filter(i => i >= 0));
+  const start = Number.isFinite(firstIdx) ? firstIdx : 0;
 
-        // 跳過視窗未滿造成的前段 NaN
-        const i = fused.findIndex(Number.isFinite);
-        if (i === -1){
-          msgBox.textContent = 'CSV 沒有可用數據（Fused_macro 與 *_norm 都是空）。';
-          return;
-        }
-        renderChart(dates.slice(i), fused.slice(i));
-      }catch(err){
-        stateBadge.textContent = '狀態：讀取失敗';
-        msgBox.textContent = '讀取或解析失敗，請開 F12 看 console。';
-        console.error(err);
-      }
-    }
+  // ECharts option
+  const option = {
+    color: SERIES_DEF.map(s => s.color),
+    tooltip: { trigger:'axis' },
+    legend: {
+      top: 8,
+      selected: Object.fromEntries(SERIES_DEF.map(s => [s.name, document.getElementById(s.id)?.checked]))
+    },
+    xAxis: { type:'category', data: dates.slice(start) },
+    yAxis: { type:'value' },
+    dataZoom: [{ type:'inside' }, { type:'slider' }],
+    series: SERIES_DEF.map(s => ({
+      name: s.name,
+      type: 'line',
+      data: seriesMap[s.name].slice(start),
+      showSymbol: false,
+      connectNulls: true,
+      lineStyle: { width: 2 },
+      itemStyle: { color: s.color },
+      emphasis: { focus: 'series' }
+    }))
+  };
+  chart.setOption(option, true);
+}
 
-    // ---- 6) 控件 ----
-    document.getElementById('btnSaveSrc').addEventListener('click', ()=>{
-      localStorage.setItem('csvUrl', csvUrl.value);
-      stateBadge.textContent = '狀態：已儲存連結';
-    });
-    document.getElementById('btnRefresh').addEventListener('click', main);
+// ---------- 5) 主流程與事件 ----------
+let _rows = null;
 
-    // 首次載入
-    main();
-  </script>
-</body>
-</html>
+async function main(){
+  try{
+    msg.textContent = '';
+    if (!_rows) _rows = await getRows();
+    buildAndRender(_rows);
+  }catch(err){
+    stateBadge.textContent = '狀態：讀取失敗';
+    msg.textContent = '讀取或解析失敗，請開 F12 看 console。';
+    console.error(err);
+  }
+}
+
+// 勾選框 → 即時刷新；更新 / 儲存連結 → 重跑
+['showFused','showHSI','showHSTE','showCNH','showVHSI','showBTC'].forEach(id=>{
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => { if (_rows) buildAndRender(_rows); });
+});
+document.getElementById('btnRefresh')?.addEventListener('click', async ()=>{
+  _rows = null; await main();
+});
+document.getElementById('btnSaveSrc')?.addEventListener('click', ()=>{
+  localStorage.setItem('csvUrl', csvUrl.value);
+});
+
+// 首次載入
+main();
+</script>
