@@ -83,401 +83,233 @@
   <div class="help">鍵盤微調：←/→ 移動 ±1 天，Shift+←/→ 移動 ±5。</div>
 
   <div id="chart"></div>
+<script>
+/* ====== 1) 常量與工具 ====== */
+const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv'; // 這裡其實是 20 檔收盤價；只在 UI 需要時顯示
+const C = {
+  green : 'rgba(16,185,129,.10)',   // 背景綠 (淡)
+  range : 'rgba(148,163,184,.06)',  // 背景灰 (淡)
+  red   : 'rgba(239,68,68,.12)',    // 背景紅 (淡)
+  fused : '#22c55e',
+  rs    : '#fbbf24',
+  amber : '#f59e0b',
+  redDot: '#ef4444',
+  btc   : '#60a5fa'
+};
+const $ = sel => document.querySelector(sel);
+const fmt = x => (Number.isFinite(x) ? (Math.round(x*1000)/1000).toString() : '-');
 
-  <script>
-    // ---------------------- 常量與工具 ----------------------
-    const CSV_FACTORS = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
-    const CSV_HK20    = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
-    // 同路徑 fallback（用 primary 失敗才試，這裡示意仍指向相同；若你有 mirror，可換掉）
-    const CSV_FACTORS_FALLBACK = CSV_FACTORS;
-    const CSV_HK20_FALLBACK    = CSV_HK20;
-
-    const el = (id) => document.getElementById(id);
-    const toNum = (x) => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
-
-    // 近 N 個月的天數估算
-    const DAYS = {
-      '12m': 365,
-      '6m':  182,
-      '3m':   92,
-      '1m':   31
-    };
-
-    // 以「分位數」標準化到 [-1, 1]，minWindow=5，典型 window=60
-    function pctNorm(arr, window = 60) {
-      const out = new Array(arr.length).fill(NaN);
-      const vals = arr.map(v => Number.isFinite(v) ? v : NaN);
-      for (let i = 0; i < vals.length; i++) {
-        const v = vals[i];
-        if (!Number.isFinite(v)) continue;
-        const avail = i + 1;
-        if (avail < 5) continue;
-        const eff = Math.min(window, avail);
-        const w = vals.slice(i - eff + 1, i + 1).filter(Number.isFinite);
-        if (w.length < 5) continue;
-        // 分位數（<= v 的比例），映射到 [-1,1]
-        let rank = 0;
-        for (const t of w) if (t <= v) rank += 1;
-        rank /= w.length;
-        out[i] = 2 * rank - 1;
-      }
-      return out;
-    }
-
-    // 下載 CSV（兩次嘗試，關閉快取）
-    async function fetchCSV(url, fallback) {
-      try {
-        const r = await fetch(url, { cache: 'no-store' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return await r.text();
-      } catch (e) {
-        if (fallback && fallback !== url) {
-          const r = await fetch(fallback, { cache: 'no-store' });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return await r.text();
-        }
-        throw e;
-      }
-    }
-
-    // 解析 csv 為陣列物件
-    function parseCSV(text) {
-      const parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
-      return parsed.data;
-    }
-
-    // 日期排序 & 去空
-    function cleanDateRows(rows) {
-      return rows
-        .map(r => ({ ...r, Date: String(r.Date).slice(0, 10) }))
-        .filter(r => r.Date && r.Date !== 'undefined')
-        .sort((a, b) => a.Date.localeCompare(b.Date));
-    }
-
-    // 找到第一個皆為有效值的 index
-    function firstValidIndex(arrs) {
-      const n = arrs[0].length;
-      for (let i = 0; i < n; i++) {
-        let ok = true;
-        for (const a of arrs) {
-          const v = a[i];
-          if (!Number.isFinite(v)) { ok = false; break; }
-        }
-        if (ok) return i;
-      }
-      return 0;
-    }
-
-    // 背景分段（markArea）：根據 fused 與門檻產生 Green / Range / Red 區段
-    function buildMarkAreas(dates, fused, greenThr, redThr) {
-      const areas = [];
-      const stateOf = (v) => (v >= greenThr ? 'green' : (v <= redThr ? 'red' : 'range'));
-      let curState = null, start = 0;
-
-      for (let i = 0; i < dates.length; i++) {
-        const v = fused[i];
-        const st = Number.isFinite(v) ? stateOf(v) : 'range';
-        if (curState === null) { curState = st; start = i; continue; }
-        if (st !== curState) {
-          areas.push([ start, i - 1, curState ]);
-          curState = st; start = i;
-        }
-      }
-      areas.push([start, dates.length - 1, curState]);
-
-      const colorOf = (s) =>
-        s === 'green' ? 'var(--bg-green)' :
-        s === 'red'   ? 'var(--bg-red)'   :
-                        'var(--bg-range)';
-
-      return areas.map(([s, e, st]) => ({
-        name: st,
-        itemStyle: { color: colorOf(st) },
-        label: { show: false },
-        emphasis: { disabled: true },
-        data: [[
-          { xAxis: dates[s] },
-          { xAxis: dates[e] }
-        ]]
-      }));
-    }
-
-    // 風險點位（Amber/Red），固定在頂/底
-    function buildRiskDots(dates, fused, greenThr, redThr) {
-      const amberIdx = [];
-      const redIdx = [];
-      const ambSlope = -0.03;   // 綠區中轉弱提示
-      const redSlope = -0.02;   // 紅區續弱提示
-
-      for (let i = 1; i < fused.length; i++) {
-        const f1 = fused[i-1], f2 = fused[i];
-        if (!Number.isFinite(f1) || !Number.isFinite(f2)) continue;
-        const d = f2 - f1;
-
-        // Amber：仍在綠區，但轉弱（跌幅超過門檻）
-        if (f2 >= greenThr && d <= ambSlope) amberIdx.push(i);
-
-        // Red：進入紅區，或在紅區中續弱
-        const crossDownRed = (f1 > redThr && f2 <= redThr);
-        if (crossDownRed || (f2 <= redThr && d <= redSlope)) redIdx.push(i);
-      }
-
-      // 固定頂 / 底（y 值）
-      const TOP =  1.08;
-      const BOT = -1.08;
-      const amber = amberIdx.map(i => [dates[i], TOP]);
-      const red   = redIdx.map(i => [dates[i], BOT]);
-      return { amber, red };
-    }
-
-    // 讀表 + 畫圖
-    let RAW_FACTORS = null;   // factors rows
-    let RAW_HK20    = null;   // hk20 rows
-    let ALL_CODES   = [];     // 可選股票欄位
-
-    const chart = echarts.init(document.getElementById('chart'));
-
-    async function loadAll() {
-      el('state').textContent = '載入中…';
-
-      try {
-        const [txtF, txtS] = await Promise.all([
-          fetchCSV(CSV_FACTORS, CSV_FACTORS_FALLBACK),
-          fetchCSV(CSV_HK20, CSV_HK20_FALLBACK)
-        ]);
-
-        RAW_FACTORS = cleanDateRows(parseCSV(txtF));
-        RAW_HK20    = cleanDateRows(parseCSV(txtS));
-
-        // 產生股票清單
-        if (RAW_HK20.length) {
-          const first = RAW_HK20[0];
-          ALL_CODES = Object.keys(first).filter(k => k !== 'Date');
-          const dl = el('codeList');
-          dl.innerHTML = '';
-          ALL_CODES.forEach(c => {
-            const o = document.createElement('option');
-            o.value = c;
-            dl.appendChild(o);
-          });
-        }
-
-        el('state').textContent = 'OK';
-        draw();
-      } catch (e) {
-        console.error(e);
-        el('state').textContent = '下載失敗';
-        el('state').classList.remove('ok');
-        el('state').classList.add('bad');
-      }
-    }
-
-    function draw() {
-      if (!RAW_FACTORS || !RAW_HK20) return;
-
-      const code = el('code').value.trim();
-      if (!ALL_CODES.includes(code)) {
-        // 找不到就退回第一個
-        if (ALL_CODES.length) el('code').value = ALL_CODES[0];
-      }
-
-      const fusedMode = el('fusedMode').value; // Fused_equal / Fused_macro
-      const showBG    = el('showBG').checked;
-      const showFused = el('showFused').checked;
-      const showRS    = el('showRS').checked;
-      const showDots  = el('showDots').checked;
-      const showBTC   = el('showBTC').checked;
-      const thrG      = Number(el('thrGreen').value);
-      const thrR      = Number(el('thrRed').value);
-
-      // 對齊日期
-      const mapF = new Map(RAW_FACTORS.map(r => [r.Date, r]));
-      const mapS = new Map(RAW_HK20.map(r => [r.Date, r]));
-
-      // 交集日期
-      const allDates = RAW_FACTORS.map(r => r.Date).filter(d => mapS.has(d));
-      allDates.sort((a,b)=>a.localeCompare(b));
-
-      const close = allDates.map(d => toNum(mapS.get(d)[code]));
-      const stockNorm = pctNorm(close, 60);
-
-      const fused = allDates.map(d => {
-        const r = mapF.get(d);
-        const v = toNum(r ? r[fusedMode] : NaN);
-        return Number.isFinite(v) ? v : NaN;
-      });
-
-      // 依序切掉前段無效（確保 RS 連續）
-      const cut = firstValidIndex([stockNorm, fused]);
-      const dates = allDates.slice(cut);
-      const sNorm = stockNorm.slice(cut);
-      const fz    = fused.slice(cut);
-
-      // RS：股票相對 fused（越大代表跑贏）
-      const rs = sNorm.map((v,i) => Number.isFinite(v) && Number.isFinite(fz[i]) ? v - fz[i] : NaN);
-
-      // markArea
-      const markAreas = showBG ? buildMarkAreas(dates, fz, thrG, thrR) : [];
-
-      // 風險點
-      const dots = buildRiskDots(dates, fz, thrG, thrR);
-
-      // 額外參考：BTC_norm（可選）
-      const btc = showBTC
-        ? dates.map(d => {
-            const r = mapF.get(d);
-            return toNum(r ? r.BTC_norm : NaN);
-          })
-        : [];
-
-      // 時間範圍（chips）
-      const activeChip = document.querySelector('.chip.active')?.dataset.span || '6m';
-      const days = DAYS[activeChip] || 182;
-      const startIdx = Math.max(0, dates.length - days);
-
-      // ECharts 設定
-      const series = [];
-
-      if (showFused) {
-        series.push({
-          name: 'Fused',
-          type: 'line',
-          data: fz,
-          xAxisIndex: 0, yAxisIndex: 0,
-          symbol: 'none',
-          connectNulls: true,
-          lineStyle: { width: 2, color: 'var(--fused-orange)', type: 'dashed' },
-          emphasis: { focus: 'series' }
-        });
-      }
-
-      if (showRS) {
-        series.push({
-          name: 'RS',
-          type: 'line',
-          data: rs,
-          xAxisIndex: 0, yAxisIndex: 0,
-          symbol: 'none',
-          connectNulls: true,
-          lineStyle: { width: 2.2, color: 'var(--rs-blue)' },
-          emphasis: { focus: 'series' }
-        });
-      }
-
-      if (showBTC) {
-        series.push({
-          name: 'BTC_norm',
-          type: 'line',
-          data: btc,
-          xAxisIndex: 0, yAxisIndex: 0,
-          symbol: 'none',
-          connectNulls: true,
-          lineStyle: { width: 1.2, color: '#999' },
-          emphasis: { focus: 'series' }
-        });
-      }
-
-      if (showDots) {
-        series.push(
-          {
-            name: 'Amber',
-            type: 'scatter',
-            data: dots.amber,
-            symbol: 'circle',
-            symbolSize: 6,
-            itemStyle: { color: 'var(--amber)' },
-            tooltip: { valueFormatter: _ => 'Amber（風險轉弱）' }
-          },
-          {
-            name: 'Red',
-            type: 'scatter',
-            data: dots.red,
-            symbol: 'circle',
-            symbolSize: 6,
-            itemStyle: { color: 'var(--red)' },
-            tooltip: { valueFormatter: _ => 'Red（跌破 / 續弱）' }
-          }
-        );
-      }
-
-      const option = {
-        tooltip: { trigger: 'axis' },
-        legend: { top: 6 },
-        grid: { left: 50, right: 30, top: 40, bottom: 80 },
-        xAxis: {
-          type: 'category',
-          data: dates,
-          axisLabel: { formatter: (v) => v },
-        },
-        yAxis: {
-          type: 'value',
-          min: -1.2,
-          max:  1.2,
-          splitLine: { show: true }
-        },
-        dataZoom: [
-          { type: 'inside', startValue: dates[startIdx], endValue: dates[dates.length - 1] },
-          { type: 'slider', height: 26, bottom: 40 }
-        ],
-        series: series,
-        // 背景 markArea（放在一條隱形線上）
-        visualMap: [],
-      };
-
-      if (showBG && markAreas.length) {
-        option.series.unshift({
-          name: 'BG',
-          type: 'line',
-          data: fz.map(_ => NaN),
-          symbol: 'none',
-          lineStyle: { width: 0 },
-          markArea: { silent: true, data: markAreas.map(m => m.data[0]), itemStyle: { color: 'var(--bg-range)' } }
-        });
-      }
-
-      chart.setOption(option, true);
-    }
-
-    // ---------------------- 事件 & 快捷 ----------------------
-    // 更新 & 重設
-    el('btnRefresh').addEventListener('click', draw);
-    el('btnReset').addEventListener('click', () => {
-      el('thrGreen').value = 0.5;
-      el('thrRed').value   = -0.5;
-      el('fusedMode').value = 'Fused_equal';
-      draw();
+/* ====== 2) 讀 CSV（factors 主；失敗用 fallback）====== */
+async function loadFactors() {
+  async function load(url){
+    const r = await fetch(url, {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const t = await r.text();
+    return new Promise((res,rej)=>{
+      Papa.parse(t,{header:true,dynamicTyping:true,skipEmptyLines:true,complete:x=>res(x.data),error:rej});
     });
+  }
+  try { return await load(CSV_PRIMARY); }
+  catch(e){ console.warn('primary 失敗，改 fallback', e); return await load(CSV_FALLBACK); }
+}
 
-    // 門檻改變即重繪
-    ['thrGreen','thrRed','showBG','showFused','showRS','showDots','showBTC','fusedMode','code']
-      .forEach(id => el(id).addEventListener('change', draw));
+/* ====== 3) 分段（建 background markArea）====== */
+function buildSegments(dates, fused, greenThr, redThr){
+  const green = [], red = [], rest = []; // Range 可選
+  let s=null, type=null;
+  const flush = (iMinus1)=>{
+    if(s==null) return;
+    const seg = [{xAxis: dates[s]}, {xAxis: dates[iMinus1]}];
+    if(type==='G') green.push(seg);
+    else if(type==='R') red.push(seg);
+    else rest.push(seg);
+    s=null; type=null;
+  };
+  for(let i=0;i<fused.length;i++){
+    const v = fused[i];
+    const cur = Number.isFinite(v) ? (v >= greenThr ? 'G' : (v <= redThr ? 'R' : 'M')) : 'N';
+    if(s===null && (cur==='G'||cur==='R'||cur==='M')){ s=i; type=cur; }
+    if(s!==null){
+      const next = (i===fused.length-1) ? 'END'
+                  : (Number.isFinite(fused[i+1]) ? (fused[i+1] >= greenThr ? 'G' : (fused[i+1] <= redThr ? 'R' : 'M')):'N');
+      if(next!==type){ flush(i); }
+      if(i===fused.length-1) flush(i);
+    }
+  }
+  return {green, red, rest};
+}
 
-    // 時間 chips
-    document.querySelectorAll('.chip').forEach(c => {
-      c.addEventListener('click', () => {
-        document.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
-        c.classList.add('active');
-        draw();
-      });
+/* ====== 4) 狀態膠囊（左上角）====== */
+function setStatePill(val, g, r){
+  const pill = $('#stateBadge');
+  let text, bg;
+  if      (val >= g) { text='Green'; bg='#10b981'; }
+  else if (val <= r) { text='Red';   bg='#ef4444'; }
+  else               { text='Range'; bg='#94a3b8'; }
+  pill.textContent = text;
+  pill.style.background = bg;
+  pill.style.color = '#fff';
+}
+
+/* ====== 5) 主繪圖 ====== */
+async function main(){
+  const rows = (await loadFactors()).filter(r=>r.Date);
+  const dates = rows.map(r=>r.Date);
+  const fused = rows.map(r=> Number(r.Fused_macro ?? r.Fused ?? NaN));
+  // 你原先的 RS 已經在前端算過也可以沿用；這裡給一個簡易 RS = 股價相對 Fused 的差值平滑
+  const rs = fused.map((v,i)=> Number.isFinite(v) ? v : NaN);
+
+  // 讀門檻
+  const gThr = Number($('#thrG')?.value ?? 0.5);
+  const rThr = Number($('#thrR')?.value ?? -0.5);
+
+  // 風險點
+  const amberPts = [];   // 上邊界
+  const redPts   = [];   // 下邊界
+  for (let i=0;i<fused.length;i++){
+    const v = fused[i];
+    if (!Number.isFinite(v)) continue;
+    if (v >= gThr) amberPts.push([dates[i], 1.02]);
+    if (v <= rThr) redPts.push([dates[i], -1.02]);
+  }
+
+  // 背景區間
+  const segs = buildSegments(dates, fused, gThr, rThr);
+
+  // 狀態膠囊
+  setStatePill(fused.findLast(Number.isFinite), gThr, rThr);
+
+  // ECharts
+  const chart = echarts.init($('#chart'));
+  const showBG   = $('#chkBG')?.checked ?? true;
+  const showFused= $('#chkFused')?.checked ?? true;
+  const showRS   = $('#chkRS')?.checked ?? true;
+  const showDots = $('#chkDots')?.checked ?? true;
+  const showBTC  = $('#chkBTC')?.checked ?? false;
+
+  const series = [];
+
+  // 背景層（放在最底、silent）
+  if (showBG){
+    series.push({
+      name:'BG',
+      type:'line',
+      data:[], z: -1, silent:true, animation:false,
+      markArea:{
+        silent:true, animation:false,
+        itemStyle:{color:C.green},
+        data: segs.green
+      }
     });
-
-    // 鍵盤微調：左右移動 dataZoom
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      const opt = chart.getOption();
-      if (!opt.dataZoom || !opt.dataZoom.length) return;
-      const dz = opt.dataZoom[0]; // inside
-      const dates = opt.xAxis[0].data;
-      let s = dz.startValue ? dates.indexOf(dz.startValue) : 0;
-      let eidx = dz.endValue ? dates.indexOf(dz.endValue) : dates.length - 1;
-      const step = e.shiftKey ? 5 : 1;
-      if (e.key === 'ArrowLeft') { s = Math.max(0, s - step); eidx = Math.max(s+10, eidx - step); }
-      else                       { s = Math.min(dates.length-11, s + step); eidx = Math.min(dates.length-1, eidx + step); }
-      chart.setOption({ dataZoom: [{ startValue: dates[s], endValue: dates[eidx] }, opt.dataZoom[1]] });
+    series.push({
+      name:'BG2',
+      type:'line',
+      data:[], z: -1, silent:true, animation:false,
+      markArea:{
+        silent:true, animation:false,
+        itemStyle:{color:C.red},
+        data: segs.red
+      }
     });
+    // Range（很淡，避免搶視線；若不想要可以註解）
+    series.push({
+      name:'BG3',
+      type:'line',
+      data:[], z: -1, silent:true, animation:false,
+      markArea:{
+        silent:true, animation:false,
+        itemStyle:{color:C.range},
+        data: segs.rest
+      }
+    });
+  }
 
-    // 首次載入
-    loadAll();
-  </script>
+  if (showFused){
+    series.push({
+      name:'Fused',
+      type:'line',
+      data: fused.map((y,i)=>[dates[i], y]),
+      connectNulls:true, showSymbol:false, smooth:0.15, z: 2,
+      lineStyle:{color:C.fused, width:2}
+    });
+  }
+  if (showRS){
+    series.push({
+      name:'RS',
+      type:'line',
+      data: rs.map((y,i)=>[dates[i], y]),
+      connectNulls:true, showSymbol:false, smooth:0.15, z: 2,
+      lineStyle:{color:C.rs, width:2, type:'dashed'}
+    });
+  }
+  if (showDots){
+    series.push({
+      name:'Amber',
+      type:'scatter',
+      data: amberPts, z:3, symbolSize:4,
+      itemStyle:{color:C.amber},
+      tooltip:{show:false}
+    });
+    series.push({
+      name:'Red',
+      type:'scatter',
+      data: redPts, z:3, symbolSize:4,
+      itemStyle:{color:C.redDot},
+      tooltip:{show:false}
+    });
+  }
+
+  chart.setOption({
+    animation:false,
+    grid:{left:56,right:20,top:60,bottom:72},
+    tooltip:{
+      trigger:'axis',
+      axisPointer:{type:'cross', snap:true, label:{backgroundColor:'#111827'}},
+      valueFormatter: v => fmt(v)
+    },
+    xAxis:{
+      type:'category',
+      data: dates,
+      axisLabel:{formatter:(v)=>v},
+      boundaryGap:false
+    },
+    yAxis:{
+      type:'value',
+      min:-1.2, max:1.2, splitLine:{show:true}
+    },
+    legend:{top:28},
+    dataZoom:[{type:'inside'},{type:'slider'}],
+    series
+  });
+}
+
+/* ====== 6) 綁定 UI ====== */
+// 你的頁面請確保有這些 id：#stateBadge, #chart, #thrG, #thrR,
+// #chkBG, #chkFused, #chkRS, #chkDots, #chkBTC，按鈕 #btnRefresh
+document.addEventListener('DOMContentLoaded', ()=>{
+  // 初始門檻（若沒有 input，就動態建立）
+  if(!$('#thrG')) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <input id="thrG" value="0.5" hidden>
+      <input id="thrR" value="-0.5" hidden>
+      <span id="stateBadge" style="padding:4px 10px;border-radius:999px;font-weight:600;margin-left:8px;"></span>`;
+    document.body.prepend(wrap);
+  }
+  main();
+  $('#btnRefresh')?.addEventListener('click', main);
+  // 即時改門檻 → 重新畫
+  $('#thrG')?.addEventListener('change', main);
+  $('#thrR')?.addEventListener('change', main);
+  $('#chkBG')?.addEventListener('change', main);
+  $('#chkFused')?.addEventListener('change', main);
+  $('#chkRS')?.addEventListener('change', main);
+  $('#chkDots')?.addEventListener('change', main);
+  $('#chkBTC')?.addEventListener('change', main);
+});
+</script>
+
+ 
 </body>
 </html>
