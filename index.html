@@ -366,7 +366,7 @@ function applyRange(dates){
 }
 
 function render(){
-  if(!merged.length){ chart.clear(); return; }
+  if(!merged.length) return;
   const {series, dates} = buildSeries(merged);
   const startIdx = applyRange(dates);
 
