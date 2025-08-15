@@ -33,7 +33,11 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system
 .chk{display:flex;gap:6px;align-items:center}
 .legend{display:flex;gap:16px;align-items:center;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:999px;display:inline-block;margin-right:6px}
-.cGreen{background:var(--green)} .cAmber{background:var(--amber)} .cRed{background:var(--red)} .cBlue{background:var(--blue)}
+.cGreen{background:var(--green)}
+.cAmber{background:var(--amber)}
+.cRed{background:var(--red)}
+.cBlue{background:var(--blue)}
+.cGray{background:var(--muted)}
 #chart{height:560px}
 small{color:var(--muted)}
 hr{border:none;border-top:1px solid var(--border);margin:8px 0}
@@ -101,7 +105,8 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
   </div>
 
   <div class="legend">
-    <span><i class="dot cBlue"></i>Fused / RS</span>
+    <span><i class="dot cBlue"></i>Fused</span>
+    <span><i class="dot cGray"></i>RS</span>
     <span><i class="dot cAmber"></i>Amber</span>
     <span><i class="dot cRed"></i>Red</span>
   </div>
@@ -235,6 +240,21 @@ function buildSeries(rows, opt){
   // 線性補內插，避免斷線
   const rs = linInterp(rsSmooth);
 
+  // 將 RS 依強弱分成三段：強（>0）、中性（=0）、弱（<0）
+  const rsStrong = [], rsNeutral = [], rsWeak = [];
+  for(let i=0;i<rs.length;i++){
+    const v = rs[i];
+    if(!Number.isFinite(v)){
+      rsStrong.push(NaN); rsNeutral.push(NaN); rsWeak.push(NaN);
+    }else if(v > 0){
+      rsStrong.push(v); rsNeutral.push(NaN); rsWeak.push(NaN);
+    }else if(v < 0){
+      rsStrong.push(NaN); rsNeutral.push(NaN); rsWeak.push(v);
+    }else{
+      rsStrong.push(NaN); rsNeutral.push(v); rsWeak.push(NaN);
+    }
+  }
+
   // 背景區塊（Green / Range / Red）
   let areas = [];
   if(showBG){
@@ -308,10 +328,25 @@ function buildSeries(rows, opt){
   }
 
   if(showRS){
+    const cGreen = getComputedStyle(document.documentElement).getPropertyValue('--green').trim();
+    const cGray  = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+    const cRed   = getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
     series.push({
       type:'line', name:'RS',
-      data: rs, symbol:'none',
-      lineStyle:{width:2,color:'#8da2fb',type:'dashed'},
+      data: rsStrong, symbol:'none',
+      lineStyle:{width:2,color:cGreen,type:'dashed'},
+      z:3
+    });
+    series.push({
+      type:'line', name:'RS',
+      data: rsNeutral, symbol:'none',
+      lineStyle:{width:2,color:cGray,type:'dashed'},
+      z:3
+    });
+    series.push({
+      type:'line', name:'RS',
+      data: rsWeak, symbol:'none',
+      lineStyle:{width:2,color:cRed,type:'dashed'},
       z:3
     });
   }
