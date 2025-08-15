@@ -1,223 +1,142 @@
-<!doctype html>
-<html lang="zh-Hant">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>HK20 — 股票強弱視圖</title>
-  <!-- 必要庫 -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC",sans-serif;margin:16px;}
-    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    #chart{height:560px;margin-top:8px}
-    #msg{color:#fa8c16;margin-top:8px}
-    #stocksPanel{display:flex;gap:12px;flex-wrap:wrap;max-height:120px;overflow:auto;border:1px solid #eee;padding:8px;border-radius:8px}
-    .pill{padding:2px 8px;border:1px solid #d9d9d9;border-radius:999px}
-    button{padding:6px 10px}
-    input[type="text"]{width:560px;max-width:90vw;padding:6px}
-    small.muted{color:#999}
-  </style>
-</head>
-<body>
-  <div class="row">
-    <span id="stateBadge" class="pill">狀態：—</span>
-    <input id="csvUrl" type="text"
-      placeholder="CSV 來源 URL"
-      value="https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv" />
-    <button id="btnSaveSrc">儲存連結</button>
-    <button id="btnRefresh">立即更新</button>
-    <small class="muted">（primary: hk20.csv；fallback: factors.csv）</small>
-  </div>
-
-  <!-- 股票清單 -->
-  <div class="row" style="margin-top:8px">
-    <button id="btnAll">全選</button>
-    <button id="btnNone">全不選</button>
-    <span class="muted">勾選要顯示的股票：</span>
-  </div>
-  <div id="stocksPanel"></div>
-
-  <div id="chart"></div>
-  <div id="msg"></div>
-
 <script>
-/* =========================
-   1) 設定：primary / fallback
-   ========================= */
-const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';     // 20 檔股票
-const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv'; // 保底，不畫因子
+// === STEP 1: HK20 計算層（不改 UI）===
 
-const csvUrl     = document.getElementById('csvUrl');
-const stateBadge = document.getElementById('stateBadge');
-csvUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
+// 取得 5 位數股票欄位（例：00700）
+function getStockCols(rows){
+  const keys = Object.keys(rows[0] || {});
+  return keys.filter(k => /^\d{5}$/.test(k));
+}
 
-// 6 條「因子線」欄位名（一律排除不畫）
-const FACTOR_COLS = new Set([
-  'Fused','Fused_macro','Fused_equal',
-  'HSI_norm','HSTECH_norm','USDCNH_norm','VHSI_norm','BTC_norm'
-]);
-
-/* =========================
-   2) 工具
-   ========================= */
+// 安全轉數字
 const toNum = v => {
-  const n = typeof v === 'string' ? Number(v.trim()) : Number(v);
-  return Number.isFinite(n) ? n : NaN;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : NaN;
 };
 
-function parseCSV(text){
-  const parsed = Papa.parse(text, {
-    header: true, dynamicTyping: true, skipEmptyLines: true
+// 取陣列最後 n 個元素
+const lastN = (arr, n) => arr.slice(Math.max(0, arr.length - n));
+
+// 中位數 / MAD
+function median(xs){
+  const a = xs.slice().sort((x,y)=>x-y);
+  const m = (a.length-1)/2;
+  return (a.length % 2) ? a[m|0] : 0.5*(a[m|0] + a[(m|0)+1]);
+}
+function mad(xs){
+  const med = median(xs);
+  const dev = xs.map(v => Math.abs(v - med));
+  return median(dev);
+}
+// robust z（Iglewicz & Hoaglin 的 modified z-score：0.6745*(x - median)/MAD）
+function robustZAll(values){
+  const med = median(values);
+  const M = mad(values);
+  return {
+    med,
+    mad: M,
+    rz: values.map(v => (M ? 0.6745*(v - med)/M : 0))
+  };
+}
+
+// 百分位名次（Statistics by Jim 的 split-the-middle）
+function pctRankAll(values){
+  const n = values.length;
+  return values.map(v => {
+    let less=0, equal=0;
+    for (const x of values){ if (x < v) less++; else if (x === v) equal++; }
+    return 100 * (less + 0.5*equal) / n;
   });
-  return parsed.data.filter(r => r.Date); // 去空行
 }
 
-/* =========================
-   3) 載入 + 解析（關閉快取）
-   ========================= */
-async function loadRows(url){
-  const r = await fetch(url, {cache:'no-store'});
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-  return parseCSV(await r.text());
-}
-
-async function getRows(){
-  try{
-    const rows = await loadRows(localStorage.getItem('csvUrl') || csvUrl.value);
-    stateBadge.textContent = '狀態：OK（primary）';
-    return rows;
-  }catch(e1){
-    console.warn('primary 失敗，改用 fallback：', e1);
-    const rows = await loadRows(CSV_FALLBACK);
-    stateBadge.textContent = '狀態：OK（fallback）';
-    return rows;
+// 以 log 價對時間做 OLS 斜率（動能 proxy）
+function olsSlope(ys){
+  const n = ys.length;
+  if (n < 3) return NaN;
+  // x = 1..n
+  const sx = n*(n+1)/2;
+  const sxx = n*(n+1)*(2*n+1)/6;
+  let sy = 0, sxy = 0;
+  for (let i=0;i<n;i++){
+    const x = i+1;
+    const y = ys[i];
+    sy += y;
+    sxy += x*y;
   }
+  const num = n*sxy - sx*sy;
+  const den = n*sxx - sx*sx;
+  return den ? num/den : NaN;
+}
+// 動能：最近 LB=63 交易日的 log 價回歸斜率（年化可再乘比例，先不年化）
+function momentum(series, lb=63){
+  const seg = lastN(series.filter(Number.isFinite).map(x => Math.log(x)), lb);
+  if (seg.length < Math.min(30, lb)) return NaN;
+  return olsSlope(seg);
 }
 
-/* =========================
-   4) 由資料推股票清單 + 產生 series
-   ========================= */
-function getAllColumns(rows){
-  // 取第一筆物件的所有鍵名
-  const first = rows[0] || {};
-  return Object.keys(first).filter(k => k && k !== 'Date');
+// 產出 sparkline：最近 90 天，min-max 到 0..100
+function sparkline(series, span=90){
+  const seg = lastN(series, span).filter(Number.isFinite);
+  if (seg.length === 0) return [];
+  const lo = Math.min(...seg), hi = Math.max(...seg);
+  const rng = hi - lo || 1;
+  return seg.map(v => Math.round(100*(v - lo)/rng));
 }
 
-function buildStockList(columns){
-  // 排除 6 條因子線，留下「股票欄位」
-  return columns.filter(c => !FACTOR_COLS.has(c));
-}
+// 主建構：給 rows（含 Date 與 20 檔欄位），回傳 analytics
+function buildAnalytics(rows){
+  const cols = getStockCols(rows);
+  // 取全欄位序列
+  const series = {};
+  for (const c of cols){
+    series[c] = rows.map(r => toNum(r[c]));
+  }
+  // 今天（最後一列）
+  const last = rows[rows.length - 1] || {};
+  // 為每檔算動能、robust z、百分位、標籤與 sparkline
+  const mom = cols.map(c => momentum(series[c], 63));
+  const { rz } = robustZAll(mom);
+  const pcts = pctRankAll(mom);
+  const label = pcts.map(p => p >= 66.6667 ? "S" : (p <= 33.3333 ? "W" : "N"));
 
-function buildSeries(rows, stockNames){
-  const dates = rows.map(r => r.Date);
-  const series = stockNames.map(name => ({
-    type: 'line',
-    name,
-    data: rows.map(r => toNum(r[name])),
-    connectNulls: true,   // 連上 NaN 兩端的點，避免斷線
-    showSymbol: false,
-    emphasis: { focus: 'series' }
-  }));
-  return { dates, series };
-}
+  const board = cols.map((c,i) => ({
+    code: c,
+    price: toNum(last[c]),
+    mom63: mom[i],
+    rz: rz[i],
+    pct: pcts[i],
+    label: label[i],
+    spark: sparkline(series[c], 90)  // 之後可直接餵給小圖
+  }))
+  // 依百分位由強到弱排序，方便檢視
+  .sort((a,b) => b.pct - a.pct);
 
-/* =========================
-   5) ECharts
-   ========================= */
-const chart = echarts.init(document.getElementById('chart'));
-
-function renderChart(dates, series){
-  chart.setOption({
-    tooltip:{ trigger:'axis', axisPointer:{type:'line'} },
-    legend:{ type:'scroll' },
-    xAxis:{ type:'category', data: dates },
-    yAxis:{ type:'value' },
-    dataZoom:[{type:'inside'},{type:'slider'}],
-    series
-  }, true);
-}
-
-/* =========================
-   6) UI：股票核取方塊
-   ========================= */
-function mountCheckboxes(stockNames, onChange){
-  const panel = document.getElementById('stocksPanel');
-  panel.innerHTML = '';
-  stockNames.forEach((name, idx) => {
-    const id = 'stk_' + idx;
-    const lab = document.createElement('label');
-    lab.style.marginRight = '8px';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.id = id;
-    cb.value = name;
-    cb.checked = true;  // 預設全開
-    cb.addEventListener('change', onChange);
-    lab.appendChild(cb);
-    lab.append(' ' + name);
-    panel.appendChild(lab);
-  });
-
-  // 快捷：全選 / 全不選
-  document.getElementById('btnAll').onclick  = () => {
-    panel.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
-    onChange();
-  };
-  document.getElementById('btnNone').onclick = () => {
-    panel.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
-    onChange();
+  return {
+    asOf: last.Date,
+    columns: cols,
+    board,          // 今天的 S/N/W 看板
+    series,         // 原始價序列（之後 UI 要用）
   };
 }
 
-/* =========================
-   7) 主流程
-   ========================= */
+// ---- 把它接到你現有的 main() 後面即可 ----
+// 假設你原本在 main() 裡已經取得 rows（含 Date 與 20 檔）
+const _orig_main = typeof main === "function" ? main : null;
 async function main(){
+  if (!_orig_main) return;
+  await _orig_main(); // 先跑你原本的流程（含載圖）
   try{
-    document.getElementById('msg').textContent = '';
-    const rows = await getRows();
-    const columns = getAllColumns(rows);
-    const stockNames = buildStockList(columns);
-
-    if (stockNames.length === 0){
-      document.getElementById('msg').textContent =
-        'CSV 沒有可用的「股票欄位」。請確認 hk20.csv 是否為來源、且欄位不是因子線。';
-      renderChart([], []);
-      return;
-    }
-
-    // 初次渲染（全選）
-    const {dates, series} = buildSeries(rows, stockNames);
-    renderChart(dates, series);
-
-    // 建立核取方塊並綁定重繪
-    mountCheckboxes(stockNames, () => {
-      const picked = Array.from(document.querySelectorAll('#stocksPanel input[type=checkbox]'))
-        .filter(cb => cb.checked).map(cb => cb.value);
-      const { series } = buildSeries(rows, picked);
-      chart.setOption({ series, legend:{}, xAxis:{} }); // 增量更新
-    });
-
-    stateBadge.classList.add('pill');
+    // 這裡假設你把 rows 掛在 window 上；若沒有，請把 rows 傳進來
+    const rows = window.HK20?.rows || window.rows || null;
+    if (!rows) return;
+    const analytics = buildAnalytics(rows);
+    window.HK20 = Object.assign({}, window.HK20, { analytics });
+    console.log("[HK20] Analytics as of", analytics.asOf);
+    console.table(analytics.board.map(x => ({
+      code: x.code, label: x.label, pct: x.pct.toFixed(1),
+      rz: x.rz.toFixed(2), mom63: (x.mom63 ?? NaN).toFixed(5)
+    })));
   }catch(err){
-    console.error(err);
-    stateBadge.textContent = '狀態：讀取或解析失敗';
-    document.getElementById('msg').textContent = '讀取/解析失敗，請開 F12 → Console 查看錯誤訊息。';
-    renderChart([], []);
+    console.error("HK20 analytics error:", err);
   }
 }
-
-/* =========================
-   8) 控件
-   ========================= */
-document.getElementById('btnSaveSrc').addEventListener('click', ()=>{
-  localStorage.setItem('csvUrl', csvUrl.value);
-});
-document.getElementById('btnRefresh').addEventListener('click', main);
-
-// 首次載入
-main();
 </script>
-</body>
-</html>
