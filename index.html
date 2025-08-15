@@ -1,165 +1,178 @@
-<!doctype html>
-<html lang="zh-HK">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>HSI 5-Factor — 全系列</title>
+<!-- 放在 <head> 或這段 JS 之前 -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 
-  <!-- 必要庫：先行載入，並延後執行 -->
-  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+// ========== 1) 常數與DOM ==========
+const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+const CSV_STOCKS  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
 
-  <style>
-    body{margin:0;font:14px/1.5 -apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    .bar{display:flex;gap:8px;align-items:center;padding:10px;border-bottom:1px solid #e5e7eb}
-    #csvUrl{width:520px;max-width:70vw;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px}
-    button{padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer}
-    #stateBadge{font-weight:700;padding:2px 10px;border:1px solid #e5e7eb;border-radius:999px}
-    #msg{color:#8a2d0a;margin:8px 12px}
-    #chart{height:70vh;min-height:420px;margin:12px}
-  </style>
-</head>
-<body>
-  <div class="bar">
-    <div id="stateBadge">狀態：—</div>
-    <input id="csvUrl" type="url"
-           placeholder="CSV 連結（預設讀 factors.csv，失敗退回 hk20.csv）" />
-    <button id="btnSaveSrc">儲存連結</button>
-    <button id="btnRefresh">立即更新</button>
-  </div>
-  <div id="msg"></div>
-  <div id="chart"></div>
+const csvUrl     = document.getElementById('csvUrl');       // 既有輸入框（指向 factors）
+const stateBadge = document.getElementById('stateBadge');
+const msgBox     = document.getElementById('msg');
+csvUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
 
-  <script>
-  // 等 DOM 準備好再執行，避免找不到元素 → 白屏
-  // 參考：DOMContentLoaded 事件。 
-  // （如果你把這段搬到 <head>，務必保留這個包裝）
-  window.addEventListener('DOMContentLoaded', () => {
+// ========== 2) 小工具 ==========
+const toNum = (x) => { const v = Number(x); return Number.isFinite(v) ? v : NaN; };
 
-    // 1) 來源設定：primary + fallback
-    const CSV_PRIMARY  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
-    const CSV_FALLBACK = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
-
-    // 2) 取得必要 DOM
-    const elUrl   = document.getElementById('csvUrl');
-    const elBadge = document.getElementById('stateBadge');
-    const elMsg   = document.getElementById('msg');
-
-    // 3) 初始化輸入框（允許自訂來源）
-    elUrl.value = localStorage.getItem('csvUrl') || CSV_PRIMARY;
-
-    // 4) 小工具
-    const toNum = x => {
-      const v = Number(x);
-      return Number.isFinite(v) ? v : NaN;
-    };
-
-    // 若 Fused_macro 缺值，改用五個 *_norm 的等權平均
-    function buildFused(rows){
-      let fused = rows.map(r => toNum(r.Fused_macro));
-      if (fused.some(Number.isFinite)) return fused;
-
-      const cols = ["HSI_norm","HSTECH_norm","USDCNH_norm","VHSI_norm","BTC_norm"];
-      fused = rows.map(r => {
-        const xs = cols.map(c => toNum(r[c])).filter(Number.isFinite);
-        return xs.length ? xs.reduce((a,b)=>a+b, 0)/xs.length : NaN;
-      });
-      return fused;
-    }
-
-    // 5) 載入 + 解析（停用快取避免舊檔）
-    async function loadAndParse(url){
-      const r = await fetch(url, { cache: 'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-      const text = await r.text();
-      const parsed = Papa.parse(text, {
-        header: true, dynamicTyping: true, skipEmptyLines: true
-      });
-      // 去除沒有日期的行
-      return parsed.data.filter(row => row.Date);
-    }
-
-    async function getRows(){
-      try{
-        const rows = await loadAndParse(elUrl.value);
-        elBadge.textContent = '狀態：OK（primary）';
-        return rows;
-      }catch(e1){
-        console.warn('primary 失敗，改試 fallback：', e1);
-        const rows = await loadAndParse(CSV_FALLBACK);
-        elBadge.textContent = '狀態：OK（fallback）';
-        return rows;
-      }
-    }
-
-    // 6) 畫圖（一次放六條線，有值才畫）
-    function renderChart(dates, seriesList){
-      const chart = echarts.init(document.getElementById('chart'));
-      chart.setOption({
-        tooltip: { trigger: 'axis' },
-        legend:  { type: 'scroll' },
-        xAxis:   { type: 'category', data: dates },
-        yAxis:   { type: 'value' },
-        dataZoom:[{ type:'inside' }, { type:'slider' }],
-        series: seriesList
-      });
-    }
-
-    // 7) 主流程
-    async function main(){
-      elMsg.textContent = '';
-      try{
-        const rows  = await getRows();
-        const dates = rows.map(r => r.Date);
-
-        // 準備六條資料（有值才放進圖）
-        const defs = [
-          {key:'Fused_macro', label:'Fused',         data: buildFused(rows)},
-          {key:'HSI_norm',    label:'HSI_norm',      data: rows.map(r => toNum(r.HSI_norm))},
-          {key:'HSTECH_norm', label:'HSTECH_norm',   data: rows.map(r => toNum(r.HSTECH_norm))},
-          {key:'USDCNH_norm', label:'USDCNH_norm',   data: rows.map(r => toNum(r.USDCNH_norm))},
-          {key:'VHSI_norm',   label:'VHSI_norm',     data: rows.map(r => toNum(r.VHSI_norm))},
-          {key:'BTC_norm',    label:'BTC_norm',      data: rows.map(r => toNum(r.BTC_norm))}
-        ];
-
-        // 只保留「至少有一個有效數字」的系列
-        const enabled = defs.filter(d => d.data.some(Number.isFinite));
-        if (!enabled.length){
-          elMsg.textContent = 'CSV 沒有可用數據（Fused 與 *_norm 均為空）。';
-          return;
-        }
-
-        // 找到所有系列共同的第一筆有效索引，避開前段 NaN（例如移動窗尚未滿）
-        const firstIdx = Math.min(
-          ...enabled.map(d => d.data.findIndex(Number.isFinite)).filter(i => i >= 0)
-        );
-
-        const slicedDates = dates.slice(firstIdx);
-        const seriesList  = enabled.map(d => ({
-          type: 'line',
-          name: d.label,
-          data: d.data.slice(firstIdx),
-          connectNulls: true,
-          showSymbol: false
-        }));
-
-        renderChart(slicedDates, seriesList);
-      }catch(err){
-        elBadge.textContent = '狀態：讀取失敗';
-        elMsg.textContent = '讀取或解析失敗，請打開 F12/Console 看錯誤訊息。';
-        console.error(err);
-      }
-    }
-
-    // 8) 控件
-    document.getElementById('btnSaveSrc').addEventListener('click', ()=>{
-      localStorage.setItem('csvUrl', elUrl.value);
-    });
-    document.getElementById('btnRefresh').addEventListener('click', main);
-
-    // 9) 首次載入
-    main();
+function pickFused(rows){
+  // 先用 Fused_macro；沒有就平均五個 *_norm
+  let fused = rows.map(r => toNum(r.Fused_macro));
+  if (fused.some(Number.isFinite)) return fused;
+  const cols = ['HSI_norm','HSTECH_norm','USDCNH_norm','VHSI_norm','BTC_norm'];
+  return rows.map(r => {
+    const xs = cols.map(c => toNum(r[c])).filter(Number.isFinite);
+    return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : NaN;
   });
-  </script>
-</body>
-</html>
+}
+
+// 30日滾動 min-max 正規化 -> [-1, 1]
+function rollingMinMaxToSigned(vals, win=30){
+  const out = new Array(vals.length).fill(NaN);
+  let q = []; // 窗口數值（簡單做）
+  for (let i=0;i<vals.length;i++){
+    const v = toNum(vals[i]);
+    q.push(v);
+    if (q.length > win) q.shift();
+    if (q.length === win && q.some(Number.isFinite)){
+      const finite = q.filter(Number.isFinite);
+      const mn = Math.min(...finite), mx = Math.max(...finite);
+      const denom = (mx - mn);
+      out[i] = Number.isFinite(v) ? (denom === 0 ? 0 : ((v - mn)/denom)*2 - 1) : NaN;
+    }
+  }
+  return out;
+}
+
+// 載入 + 解析 CSV（關閉快取）
+async function loadAndParse(url){
+  const r = await fetch(url, { cache:'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+  const text = await r.text();
+  const parsed = Papa.parse(text, { header:true, dynamicTyping:true, skipEmptyLines:true });
+  return parsed.data.filter(row => row.Date);
+}
+
+// ========== 3) 取資料 ==========
+async function getAllData(){
+  // factors（用輸入框的值）+ stocks（固定抓 hk20.csv）
+  const [factors, stocks] = await Promise.all([
+    loadAndParse(csvUrl.value),
+    loadAndParse(CSV_STOCKS)
+  ]);
+  return { factors, stocks };
+}
+
+// ========== 4) 組 series ==========
+function buildSeriesAndXAxis(factorsRows, stocksRows){
+  // 統一 x 軸日期：取 union，並排序
+  const d1 = factorsRows.map(r => r.Date);
+  const d2 = stocksRows.map(r => r.Date);
+  const dateSet = new Set([...d1, ...d2]);
+  const dates = Array.from(dateSet).sort();
+
+  // 先把兩邊資料 map by date，方便取值
+  const fm = new Map(factorsRows.map(r => [r.Date, r]));
+  const sm = new Map(stocksRows.map(r => [r.Date, r]));
+
+  const series = [];
+  const legendSelected = {}; // 預設只開因子，股票先關
+
+  // ---- 因子線 ----
+  const fused = dates.map(d => {
+    const row = fm.get(d);
+    return row ? toNum(row.Fused_macro) : NaN;
+  });
+  // 若 Fused_macro 全空，退化使用平均 *_norm
+  const fusedFallback = pickFused(dates.map(d => fm.get(d) || {}));
+  const fusedData = fused.some(Number.isFinite) ? fused : fusedFallback;
+
+  series.push({ type:'line', name:'Fused', data:fusedData, connectNulls:true, showSymbol:false, z:3 });
+
+  const factorCols = ['HSI_norm','HSTECH_norm','USDCNH_norm','VHSI_norm','BTC_norm'];
+  factorCols.forEach(col=>{
+    series.push({
+      type:'line',
+      name: col,
+      data: dates.map(d => { const r = fm.get(d); return r ? toNum(r[col]) : NaN; }),
+      connectNulls:true, showSymbol:false, z:2
+    });
+  });
+  factorCols.concat(['Fused']).forEach(n => legendSelected[n] = true);
+
+  // ---- 股票線（來自 hk20.csv）----
+  // 1) 先找 *_norm 欄位
+  const sampleRow = stocksRows[0] || {};
+  const allKeys = Object.keys(sampleRow).filter(k => k !== 'Date');
+
+  let stockNormCols = allKeys.filter(k => k.endsWith('_norm'));
+  let stockRawCols  = allKeys.filter(k => !k.endsWith('_norm'));
+
+  // 若沒有 *_norm，就把 raw 欄位做 30 日正規化
+  if (stockNormCols.length === 0 && stockRawCols.length > 0){
+    stockRawCols.forEach(col=>{
+      const raw = dates.map(d => { const r = sm.get(d); return r ? toNum(r[col]) : NaN; });
+      const norm = rollingMinMaxToSigned(raw, 30);
+      const name = col + '_norm';
+      series.push({ type:'line', name, data:norm, connectNulls:true, showSymbol:false, z:1 });
+      legendSelected[name] = false; // 預設關閉
+    });
+  }else{
+    // 有 *_norm 直接用
+    stockNormCols.forEach(col=>{
+      series.push({
+        type:'line', name: col, 
+        data: dates.map(d => { const r = sm.get(d); return r ? toNum(r[col]) : NaN; }),
+        connectNulls:true, showSymbol:false, z:1
+      });
+      legendSelected[col] = false; // 預設關閉
+    });
+  }
+
+  return { dates, series, legendSelected };
+}
+
+// ========== 5) 畫圖 ==========
+function renderChart(dates, series, legendSelected){
+  const chart = echarts.init(document.getElementById('chart'));
+  chart.setOption({
+    tooltip:{ trigger:'axis', valueFormatter: v => (Number.isFinite(v)? v.toFixed(3): '-') },
+    legend:{ type:'scroll', top: 6, selected: legendSelected },
+    xAxis:{ type:'category', data:dates },
+    yAxis:{ type:'value' },
+    dataZoom:[{type:'inside'},{type:'slider'}],
+    series
+  }, true);
+}
+
+// ========== 6) 主流程 ==========
+async function main(){
+  try{
+    msgBox.textContent = '';
+    const {factors, stocks} = await getAllData();
+    stateBadge.textContent = '狀態：OK（primary + hk20）';
+
+    const {dates, series, legendSelected} = buildSeriesAndXAxis(factors, stocks);
+
+    // 若全部都沒有有效值，給提示
+    if (series.every(s => !s.data.some(Number.isFinite))){
+      msgBox.textContent = 'CSV 沒有可用數據（請檢查 *_norm 或原始價格欄位）。';
+      return;
+    }
+    renderChart(dates, series, legendSelected);
+  }catch(err){
+    console.error(err);
+    stateBadge.textContent = '狀態：讀取失敗';
+    msgBox.textContent = '讀取或解析失敗，請開 F12 看 console。';
+  }
+}
+
+// ========== 7) 控件 ==========
+document.getElementById('btnSaveSrc').addEventListener('click', ()=>{
+  localStorage.setItem('csvUrl', csvUrl.value);
+});
+document.getElementById('btnRefresh').addEventListener('click', main);
+
+// 首次載入
+main();
+</script>
