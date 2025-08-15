@@ -38,6 +38,12 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system
 .cRed{background:var(--red)}
 .cBlue{background:var(--blue)}
 .cGray{background:var(--muted)}
+.rs-bar{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.rs-item{display:flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px}
+.rs-item.green{color:var(--green);background:var(--bg-green)}
+.rs-item.red{color:var(--red);background:var(--bg-red)}
+.rs-item.range{color:var(--muted);background:var(--bg-range)}
+.rs-item .val{font-weight:700}
 #chart{height:560px}
 small{color:var(--muted)}
 hr{border:none;border-top:1px solid var(--border);margin:8px 0}
@@ -103,6 +109,8 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
       <label class="chk"><input type="checkbox" id="dotsChk" checked> 風險 Dots（<span style="color:var(--amber)">Amber 上</span> / <span style="color:var(--red)">Red 下</span>）</label>
     </div>
   </div>
+
+  <div id="rsBar" class="rs-bar"></div>
 
   <div class="legend">
     <span><i class="dot cBlue"></i>Fused</span>
@@ -414,10 +422,42 @@ function render(){
   }, true);
 }
 
+function computeRS(rows, code){
+  const close = rows.map(r => toNum(r[code]));
+  const c60 = sma(close, 60);
+  const rsRaw = close.map((c,i)=> Number.isFinite(c) && Number.isFinite(c60[i]) ? (c/c60[i]-1) : NaN);
+  const rsSmooth = sma(rsRaw, 15);
+  const rs = linInterp(rsSmooth);
+  return rs[rs.length-1];
+}
+
+function renderRSStatus(){
+  const bar = $('#rsBar');
+  if(!bar){ return; }
+  bar.innerHTML = '';
+  if(!merged.length) return;
+  const codes = Array.from($('#stockSel').options).map(o=>o.value);
+  codes.forEach(code=>{
+    const v = computeRS(merged, code);
+    const div = document.createElement('div');
+    div.className = 'rs-item';
+    if(Number.isFinite(v)){
+      const cls = v>0 ? 'green' : (v<0 ? 'red' : 'range');
+      div.classList.add(cls);
+      div.innerHTML = `${code} <span class="val">${v.toFixed(2)}</span>`;
+    }else{
+      div.classList.add('range');
+      div.textContent = `${code} N/A`;
+    }
+    bar.appendChild(div);
+  });
+}
+
 async function main(){
   RAW = await loadAll();
   merged = mergeRows(RAW.factors||[], RAW.hk20||[]);
   render();
+  renderRSStatus();
 }
 
 /* -----------------------------
@@ -446,6 +486,7 @@ $('#btnReset').addEventListener('click', ()=>{
   currentRange = '6M';
   document.querySelectorAll('#rangeBtns .btn').forEach(b=>b.classList.toggle('active', b.dataset.range==='6M'));
   render();
+  renderRSStatus();
 });
 ['#thGreen','#thRed','#bgChk','#fusedChk','#rsChk','#dotsChk','#wSel','#stockSel']
   .forEach(sel => $(sel).addEventListener('change', render));
