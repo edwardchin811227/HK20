@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>HK20 • Risk ON/OFF + RS</title>
 
-<!-- ECharts -->
+<!-- ECharts + PapaParse -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
 <style>
 :root{
@@ -46,9 +47,6 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system
 #chart{height:560px}
 small{color:var(--muted)}
 hr{border:none;border-top:1px solid var(--border);margin:8px 0}
-.loading{color:var(--amber);font-weight:bold}
-.error{color:var(--red);font-weight:bold}
-.status-msg{padding:10px;margin:10px 0;border-radius:8px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e}
 @media (max-width:720px){ #chart{height:480px} }
 </style>
 </head>
@@ -58,8 +56,6 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
   <!-- 狀態 -->
   <div class="toolbar">
     <span id="stateBadge" class="badge range">Range</span>
-    <span id="loadingStatus" class="loading" style="display:none">載入中...</span>
-    <span id="errorStatus" class="error" style="display:none"></span>
 
     <div class="pill" id="rangeBtns">
       <button class="btn" data-range="1Y">1Y</button>
@@ -71,6 +67,7 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
     <div class="pill">
       <label>股票：</label>
       <select id="stockSel">
+        <!-- 20 檔（照你的 repo 常用的）-->
         <option>00700</option><option>09988</option><option>03690</option><option>01024</option><option>01810</option>
         <option>09618</option><option>00388</option><option>02318</option><option>03988</option><option>00939</option>
         <option>09888</option><option>00005</option><option>01211</option><option>09999</option><option>09626</option>
@@ -91,6 +88,7 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
     <div class="pill">
       <button id="btnRefresh" class="btn">更新</button>
       <button id="btnReset" class="btn">重設</button>
+      <button id="btnFutu" class="btn">取得行情</button>
     </div>
   </div>
 
@@ -112,7 +110,6 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
     </div>
   </div>
 
-  <div id="statusMsg" class="status-msg" style="display:none"></div>
   <div id="rsBar" class="rs-bar"></div>
 
   <div class="legend">
@@ -123,43 +120,26 @@ hr{border:none;border-top:1px solid var(--border);margin:8px 0}
   </div>
 
   <div id="chart"></div>
-  <small>資料來源：Google Apps Script API | 最後更新：<span id="lastUpdate">-</span></small>
+  <small>資料來源：HK20/data/factors.csv（primary）＋ HK20/data/hk20.csv（fallback）</small>
 </div>
 
 <script>
-// Google Apps Script Web App URL（請替換成你的部署 URL）
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxzhecIqqry4Tr05XIJPQq2AneESlRmg13O-VjcJKPWTQbdBBgv_szWk7UxJqgRnWol6g/exec';
+/* -----------------------------
+ * 1) 設定：資料來源（primary + fallback）
+ * ----------------------------- */
+const CSV_FACTORS  = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/factors.csv';
+const CSV_HK20     = 'https://raw.githubusercontent.com/edwardchin811227/HK20/main/data/hk20.csv';
 
 const $ = s => document.querySelector(s);
 const chart = echarts.init($('#chart'));
 
 /* -----------------------------
- * 1) 小工具
+ * 2) 小工具
  * ----------------------------- */
 const toNum = v => {
   const x = Number(v);
   return Number.isFinite(x) ? x : NaN;
 };
-
-// 轉 YYYY-MM-DD；支援 "YYYY/MM/DD"、"YYYY-MM-DDTHH:mm:ss"、"YYYYMMDD"
-function normalizeDate(d) {
-  if (!d) return '';
-  const s = String(d).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
-  const t = new Date(s);
-  return isNaN(t) ? s : t.toISOString().slice(0,10);
-}
-
-// 從 row 自動挑選可用的 Fused 欄位
-function pickFusedKey(row, preferred) {
-  const candidates = [preferred, 'Fused', 'Fused_equal', 'Fused_macro', 'FUSED', 'fused'];
-  for (const k of candidates) {
-    if (k && Object.prototype.hasOwnProperty.call(row, k)) return k;
-  }
-  const any = Object.keys(row || {}).find(k => /^fused/i.test(k));
-  return any || null;
-}
 
 // 線性插值（避免 RS 斷斷續續）
 function linInterp(arr){
@@ -168,6 +148,7 @@ function linInterp(arr){
   for(let i=0;i<y.length;i++){
     if(Number.isFinite(y[i])) last = i;
     else{
+      // 找下一個非 NaN
       let j=i+1; while(j<y.length && !Number.isFinite(y[j])) j++;
       if(last!==null && j<y.length){
         const a = y[last], b = y[j], span = j-last;
@@ -179,7 +160,7 @@ function linInterp(arr){
   return y;
 }
 
-// simple moving average（遇 NaN 斷開）
+// rolling mean
 function sma(xs, n){
   const out = new Array(xs.length).fill(NaN);
   let sum = 0, q = [];
@@ -190,138 +171,84 @@ function sma(xs, n){
       if(q.length>n){ sum -= q.shift(); }
       if(q.length===n) out[i] = sum/n;
     }else{
-      q.length = 0; sum = 0;
+      q.length = 0; sum = 0; // 遇到缺值就重置，以免污染
     }
   }
   return out;
 }
 
 /* -----------------------------
- * 2) 載入資料
+ * 3) 載入 CSV + 合併
  * ----------------------------- */
-function showLoading(show) {
-  const loading = $('#loadingStatus');
-  if (loading) loading.style.display = show ? 'inline' : 'none';
+async function fetchCSV(url){
+  const r = await fetch(url, {cache:'no-store'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return await r.text();
 }
-
-function showError(msg) {
-  const error = $('#errorStatus');
-  const statusMsg = $('#statusMsg');
-  if (error) {
-    error.textContent = msg || '';
-    error.style.display = msg ? 'inline' : 'none';
-  }
-  if (statusMsg && msg) {
-    statusMsg.innerHTML = `<strong>錯誤：</strong>${msg}`;
-    statusMsg.style.display = 'block';
-  } else if (statusMsg) {
-    statusMsg.style.display = 'none';
-  }
-}
-
-async function loadFromGAS() {
-  showLoading(true);
-  showError('');
-  try {
-    // 若在 GAS HtmlService 環境
-    if (typeof google !== 'undefined' && google.script && google.script.run) {
-      return new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler(resolve)
-          .withFailureHandler(reject)
-          .handleDataRequest({ parameter: { action: 'getData', type: 'all' } });
-      });
-    } else {
-      // 靜態頁用 fetch
-      const response = await fetch(`${GAS_API_URL}?action=getData&type=all`, { cache:'no-cache' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      // 若回傳到的是 HTML（多半是未公開部署），這裡會 throw
-      const text = await response.text();
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw new Error('非 JSON 回應（可能 Web App 未正確發布或權限不足）');
-      }
-    }
-  } catch (e) {
-    console.error('Error loading data:', e);
-    showError(`載入資料失敗: ${e.message}`);
-    throw e;
-  } finally {
-    showLoading(false);
-  }
-}
-
-/* -----------------------------
- * 3) 資料合併 + 繪圖
- * ----------------------------- */
-let mergedData = [];
-let currentRange = '6M';
-
-function mergeData(factors, stockData) {
-  if (!Array.isArray(factors) || !factors.length) return [];
-
-  // stocks 轉 Map<Date(YYYY-MM-DD), Close>
-  const stockMaps = {};
-  Object.keys(stockData || {}).forEach(code => {
-    const mp = new Map();
-    (stockData[code] || []).forEach(row => {
-      const d = normalizeDate(row.Date);
-      const c = toNum(row.Close);
-      if (d && Number.isFinite(c)) mp.set(d, c);
-    });
-    stockMaps[code] = mp;
+function parseCSV(text){
+  return new Promise((resolve,reject)=>{
+    Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true,complete:res=>resolve(res.data),error:reject});
   });
-
-  // 依 factors 的日期為主
-  const out = [];
-  for (const f of factors) {
-    const d = normalizeDate(f.Date);
-    if (!d) continue;
-    const merged = { ...f, Date: d };
-    for (const code of Object.keys(stockMaps)) {
-      merged[code] = stockMaps[code].get(d) ?? NaN;
-    }
-    out.push(merged);
+}
+async function loadAll(){
+  // 先 factors（有 Fused、*_norm）
+  try{
+    const t1 = await fetchCSV(CSV_FACTORS);
+    var factors = await parseCSV(t1);
+  }catch(e){
+    // fallback only for stocks
+    factors = null;
   }
-  return out;
+  // 再 hk20（20 檔 close）
+  try{
+    const t2 = await fetchCSV(CSV_HK20);
+    var hk20 = await parseCSV(t2);
+  }catch(e){
+    hk20 = [];
+  }
+  return {factors, hk20};
 }
 
-function buildSeries(mergedData) {
+/* -----------------------------
+ * 4) 主流程：計算 RS / 風險 dots / 背景區塊
+ * ----------------------------- */
+function buildSeries(rows, opt){
+  // rows 來自 factors（含 *_norm + Fused_*），日期格式 YYYY-MM-DD
   const G = Number($('#thGreen').value);
   const R = Number($('#thRed').value);
-  const showBG = $('#bgChk').checked;
-  const showFused = $('#fusedChk').checked;
-  const showRS = $('#rsChk').checked;
+  const showBG   = $('#bgChk').checked;
+  const showFused= $('#fusedChk').checked;
+  const showRS   = $('#rsChk').checked;
   const showDots = $('#dotsChk').checked;
 
+  // 權重版本
   const weightMap = {
     equal: 'Fused_equal',
     macro: 'Fused_macro',
     aggressive_plus: 'Fused_aggressive_plus',
     conservative_plus: 'Fused_conservative_plus'
   };
-  const preferredKey = weightMap[$('#wSel').value] || 'Fused_equal';
+  const fusedKey = weightMap[$('#wSel').value] || 'Fused_equal';
 
-  // 依首列自動偵測 Fused 欄位
-  const firstRow = mergedData[0] || {};
-  const fusedKey = pickFusedKey(firstRow, preferredKey);
-  if (!fusedKey) {
-    showError('找不到 Fused 欄位。請確認後端鍵名（如 Fused 或 Fused_equal）。');
-    return { series: [], dates: [] };
-  }
+  // x 軸
+  const dates = rows.map(r => r.Date);
 
-  const dates = mergedData.map(r => r.Date);
-  const fused = mergedData.map(r => toNum(r[fusedKey]));
+  // fused / 各指標
+  const fused = rows.map(r => toNum(r[fusedKey]));
 
+  // RS 計法（相對強弱）：用「股票當天收盤 / 自身 60d SMA」-1，再做 15d 平滑
+  // （股票的 close 從 hk20.csv 取；沒資料時 RS=NaN）
   const code = $('#stockSel').value;
-  const close = mergedData.map(r => toNum(r[code]));
+  const close = rows.map(r => toNum(r[code]));          // 把 hk20 的同名欄位 merge 到 factors 前了（在 main() 做）
+  // 60d SMA
   const c60 = sma(close, 60);
   const rsRaw = close.map((c,i)=> Number.isFinite(c)&&Number.isFinite(c60[i]) ? (c/c60[i]-1) : NaN);
+  // 平滑（15d）
   const rsSmooth = sma(rsRaw, 15);
+  // 線性補內插，避免斷線
   const rs = linInterp(rsSmooth);
 
-  // RS 三段
+  // 將 RS 依強弱分成三段：強（>0）、中性（=0）、弱（<0）
   const rsStrong = [], rsNeutral = [], rsWeak = [];
   for(let i=0;i<rs.length;i++){
     const v = rs[i];
@@ -336,22 +263,23 @@ function buildSeries(mergedData) {
     }
   }
 
-  // 背景區塊
+  // 背景區塊（Green / Range / Red）
   let areas = [];
   if(showBG){
+    // 三段門檻：fused >= G → Green； fused <= R → Red； 其餘 Range
     let curType = null, start = 0;
-    const pushArea = (type, s, e) => {
+    function pushArea(type, s, e){
       if(e<=s) return;
       let color = 'rgba(0,0,0,0)';
-      if(type==='G') color = 'rgba(16,185,129,.10)';
-      if(type==='N') color = 'rgba(107,114,128,.10)';
-      if(type==='R') color = 'rgba(239,68,68,.10)';
+      if(type==='G') color = getComputedStyle(document.documentElement).getPropertyValue('--bg-green');
+      if(type==='N') color = getComputedStyle(document.documentElement).getPropertyValue('--bg-range');
+      if(type==='R') color = getComputedStyle(document.documentElement).getPropertyValue('--bg-red');
       areas.push({
         name: (type==='G'?'Green':type==='R'?'Red':'Range'),
         itemStyle:{color},
         xAxis:[dates[s], dates[e-1]]
       });
-    };
+    }
     for(let i=0;i<dates.length;i++){
       const f = fused[i];
       const t = Number.isFinite(f) ? (f>=G?'G':(f<=R?'R':'N')) : curType;
@@ -361,27 +289,29 @@ function buildSeries(mergedData) {
     }
   }
 
-  // 風險 dots
+  // 風險 dots：Amber 在上（rs 高於 0 → 這裡用 rs > 0 做示意），Red 在下（rs < 0）
+  // 你可以改成更嚴苛的門檻（例如 > +0.02 / < -0.02）
   const amber = [], red = [];
   if(showDots){
     for(let i=0;i<dates.length;i++){
       const v = rs[i];
       if(!Number.isFinite(v)) continue;
-      if(v >= 0) amber.push([dates[i], v + 0.03]);
-      else red.push([dates[i], v - 0.03]);
+      if(v >= 0) amber.push([dates[i], v + 0.03]); // 放「上面」一點
+      else       red.push([dates[i], v - 0.03]);   // 放「下面」一點
     }
   }
 
-  // 狀態 badge
+  // 狀態 pill
   const lastF = fused.at(-1);
   const state = Number.isFinite(lastF) ? (lastF>=G?'green':(lastF<=R?'red':'range')) : 'range';
   const badge = $('#stateBadge');
   badge.className = 'badge '+state;
   badge.textContent = state==='green'?'Green':state==='red'?'Red':'Range';
 
-  // series
+  // ECharts series 組裝
   const series = [];
 
+  // 背景分區（用 markArea，層級最低，不遮滑鼠線）
   if(showBG && areas.length){
     series.push({
       type:'line',
@@ -390,10 +320,7 @@ function buildSeries(mergedData) {
       markArea:{
         silent:true,
         itemStyle:{opacity:1},
-        data: areas.map(a=>[
-          {xAxis:a.xAxis[0],itemStyle:{color:a.itemStyle.color}},
-          {xAxis:a.xAxis[1]}
-        ])
+        data: areas.map(a=>[{xAxis:a.xAxis[0],itemStyle:{color:a.itemStyle.color}},{xAxis:a.xAxis[1]}])
       },
       lineStyle:{opacity:0}, symbol:'none', z:0, zlevel:0
     });
@@ -403,28 +330,31 @@ function buildSeries(mergedData) {
     series.push({
       type:'line', name:'Fused',
       data: fused, symbol:'none',
-      lineStyle:{width:2,color:'#2563eb'},
+      lineStyle:{width:2,color:getComputedStyle(document.documentElement).getPropertyValue('--blue')},
       z:3
     });
   }
 
   if(showRS){
+    const cGreen = getComputedStyle(document.documentElement).getPropertyValue('--green').trim();
+    const cGray  = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+    const cRed   = getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
     series.push({
-      type:'line', name:'RS Strong',
+      type:'line', name:'RS',
       data: rsStrong, symbol:'none',
-      lineStyle:{width:2,color:'#10b981',type:'dashed'},
+      lineStyle:{width:2,color:cGreen,type:'dashed'},
       z:3
     });
     series.push({
-      type:'line', name:'RS Neutral',
+      type:'line', name:'RS',
       data: rsNeutral, symbol:'none',
-      lineStyle:{width:2,color:'#6b7280',type:'dashed'},
+      lineStyle:{width:2,color:cGray,type:'dashed'},
       z:3
     });
     series.push({
-      type:'line', name:'RS Weak',
+      type:'line', name:'RS',
       data: rsWeak, symbol:'none',
-      lineStyle:{width:2,color:'#ef4444',type:'dashed'},
+      lineStyle:{width:2,color:cRed,type:'dashed'},
       z:3
     });
   }
@@ -433,21 +363,38 @@ function buildSeries(mergedData) {
     series.push({
       type:'scatter', name:'Amber',
       data: amber, symbolSize:6,
-      itemStyle:{color:'#f59e0b'},
+      itemStyle:{color:getComputedStyle(document.documentElement).getPropertyValue('--amber').trim()},
       z:4
     });
   }
-  
   if(showDots && red.length){
     series.push({
       type:'scatter', name:'Red',
       data: red, symbolSize:6,
-      itemStyle:{color:'#ef4444'},
+      itemStyle:{color:getComputedStyle(document.documentElement).getPropertyValue('--red').trim()},
       z:4
     });
   }
 
   return {series, dates};
+}
+
+/* -----------------------------
+ * 5) 畫圖 + 交互
+ * ----------------------------- */
+let RAW = {factors:null, hk20:null};
+let merged = [];     // factors + 20 檔 close 合併後（照日期）
+let currentRange = '6M';
+
+function mergeRows(factors, hk20){
+  if(!factors) return [];
+  // 把 20 檔 close 合併到 factors（以 Date 對齊）
+  // hk20 的每欄就是一個 code（00700...）
+  const map = new Map(hk20.map(r => [r.Date, r]));
+  return factors.map(r=>{
+    const extra = map.get(r.Date)||{};
+    return {...extra, ...r}; // 以 factors 欄位為主（含 *_norm, Fused_*）
+  }).filter(r=>r.Date);
 }
 
 function applyRange(dates){
@@ -461,49 +408,22 @@ function applyRange(dates){
 }
 
 function render(){
-  if(!mergedData.length) {
-    console.log('No merged data available');
-    return;
-  }
-  try {
-    const {series, dates} = buildSeries(mergedData);
-    if (!dates.length) return;
+  if(!merged.length) return;
+  const {series, dates} = buildSeries(merged);
+  const startIdx = applyRange(dates);
 
-    const startIdx = applyRange(dates);
-    const startVal = dates[Math.max(0, startIdx)];
-    const endVal = dates[dates.length - 1];
-
-    // 安全網：判斷是否真的有數值可畫
-    const hasData = Array.isArray(series) && series.some(s =>
-      Array.isArray(s.data) && s.data.some(v =>
-        Array.isArray(v) ? v.some(Number.isFinite) : Number.isFinite(v)
-      )
-    );
-    if (!hasData) {
-      showError('資料已載入，但沒有可繪製的數值。通常是日期對不齊或欄位名不匹配造成。');
-    } else {
-      showError('');
-    }
-
-    chart.setOption({
-      animation:false,
-      tooltip:{trigger:'axis'},
-      dataZoom:[
-        {type:'inside', startValue:startVal, endValue:endVal},
-        {type:'slider', startValue:startVal, endValue:endVal}
-      ],
-      xAxis:{type:'category',data:dates,axisLabel:{color:'#6b7280'}},
-      yAxis:{type:'value',axisLabel:{color:'#6b7280'}},
-      series
-    }, true);
-  } catch (e) {
-    console.error('Error rendering chart:', e);
-    showError(`圖表渲染失敗: ${e.message}`);
-  }
+  chart.setOption({
+    animation:false,
+    tooltip:{trigger:'axis'},
+    dataZoom:[{type:'inside',startValue:startIdx,endValue:dates.length-1},{type:'slider'}],
+    xAxis:{type:'category',data:dates,axisLabel:{color:'#6b7280'}},
+    yAxis:{type:'value',axisLabel:{color:'#6b7280'}},
+    series
+  }, true);
 }
 
-function computeRS(data, code){
-  const close = data.map(r => toNum(r[code]));
+function computeRS(rows, code){
+  const close = rows.map(r => toNum(r[code]));
   const c60 = sma(close, 60);
   const rsRaw = close.map((c,i)=> Number.isFinite(c) && Number.isFinite(c60[i]) ? (c/c60[i]-1) : NaN);
   const rsSmooth = sma(rsRaw, 15);
@@ -513,19 +433,18 @@ function computeRS(data, code){
 
 function renderRSStatus(){
   const bar = $('#rsBar');
-  if(!bar) return;
+  if(!bar){ return; }
   bar.innerHTML = '';
-  if(!mergedData.length) return;
-  
+  if(!merged.length) return;
   const codes = Array.from($('#stockSel').options).map(o=>o.value);
   codes.forEach(code=>{
-    const v = computeRS(mergedData, code);
+    const v = computeRS(merged, code);
     const div = document.createElement('div');
     div.className = 'rs-item';
     if(Number.isFinite(v)){
       const cls = v>0 ? 'green' : (v<0 ? 'red' : 'range');
       div.classList.add(cls);
-      div.innerHTML = `${code} <span class="val">${(v*100).toFixed(1)}%</span>`;
+      div.innerHTML = `${code} <span class="val">${v.toFixed(2)}</span>`;
     }else{
       div.classList.add('range');
       div.textContent = `${code} N/A`;
@@ -535,72 +454,43 @@ function renderRSStatus(){
 }
 
 async function main(){
-  try {
-    console.log('Starting data load from GAS...');
-    const data = await loadFromGAS();
-
-    if (data && (data.error || data.message && data.error !== undefined)) {
-      throw new Error(data.message || data.error);
-    }
-
-    console.log('Data loaded:', {
-      factors: data?.factors?.length || 0,
-      stocks: data?.stocks ? Object.keys(data.stocks).length : 0,
-      lastUpdate: data?.lastUpdate
-    });
-
-    mergedData = mergeData(data?.factors || [], data?.stocks || {});
-    console.log('Merged data:', mergedData.length, 'rows');
-
-    if (mergedData.length > 0) {
-      render();
-      renderRSStatus();
-      const last = $('#lastUpdate');
-      if (last) last.textContent = data?.lastUpdate || new Date().toLocaleString('zh-HK');
-      showError('');
-    } else {
-      showError('無合併資料可用（請檢查日期格式與欄位鍵名）');
-    }
-  } catch (e) {
-    console.error('Error in main():', e);
-    const badge = $('#stateBadge');
-    badge.className = 'badge red';
-    badge.textContent = 'Error';
-    showError(`載入失敗: ${e.message}`);
-  }
+  RAW = await loadAll();
+  merged = mergeRows(RAW.factors||[], RAW.hk20||[]);
+  render();
+  renderRSStatus();
 }
 
 /* -----------------------------
- * 4) 事件處理
+ * 6) 事件
  * ----------------------------- */
+async function fetchFutu(){
+  const code = 'HK.' + $('#stockSel').value;
+  try{
+    const r = await fetch(`/api/snapshot?code=${code}`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    console.log('Futu snapshot', data);
+  }catch(e){
+    console.error('Futu API error', e);
+    alert('無法取得 Futu 資料');
+  }
+}
 $('#btnRefresh').addEventListener('click', main);
 $('#btnReset').addEventListener('click', ()=>{
   $('#thGreen').value = 0.50;
-  $('#thRed').value = -0.5;
+  $('#thRed').value   = -0.5;
   $('#bgChk').checked = true;
   $('#fusedChk').checked = true;
-  $('#rsChk').checked = true;
-  $('#dotsChk').checked = true;
-  $('#wSel').value = 'equal';
+  $('#rsChk').checked  = true;
+  $('#dotsChk').checked= true;
   currentRange = '6M';
   document.querySelectorAll('#rangeBtns .btn').forEach(b=>b.classList.toggle('active', b.dataset.range==='6M'));
   render();
   renderRSStatus();
 });
-
-// 監聽控制項變化
 ['#thGreen','#thRed','#bgChk','#fusedChk','#rsChk','#dotsChk','#wSel','#stockSel']
-  .forEach(sel => {
-    const el = $(sel);
-    if (el) {
-      el.addEventListener('change', () => {
-        render();
-        renderRSStatus();
-      });
-    }
-  });
+  .forEach(sel => $(sel).addEventListener('change', render));
 
-// 時間範圍按鈕
 document.querySelectorAll('#rangeBtns .btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#rangeBtns .btn').forEach(b=>b.classList.remove('active'));
@@ -610,20 +500,10 @@ document.querySelectorAll('#rangeBtns .btn').forEach(btn=>{
   });
 });
 
-// 自動更新（每 5 分鐘檢查）
-setInterval(() => {
-  const now = new Date();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  // 在 16:30 - 16:35 之間自動更新
-  if (hours === 16 && minutes >= 30 && minutes <= 35) {
-    console.log('Auto refresh at market close');
-    main();
-  }
-}, 5 * 60 * 1000);
+$('#btnFutu').addEventListener('click', fetchFutu);
 
-// 初始化
-window.addEventListener('DOMContentLoaded', main);
+main();
 </script>
 </body>
 </html>
+
