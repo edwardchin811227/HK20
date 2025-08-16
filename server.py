@@ -5,6 +5,8 @@ import requests
 from flask import Flask, request, jsonify
 
 DB_PATH = 'cache.db'
+# Refresh cache if older than this threshold
+CACHE_TTL = datetime.timedelta(hours=12)
 
 app = Flask(__name__)
 
@@ -53,12 +55,18 @@ def get_history_kline():
 
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
-            'SELECT data FROM history WHERE code=? AND days=?',
+            'SELECT data, updated_at FROM history WHERE code=? AND days=?',
             (code, days)
         )
         row = cur.fetchone()
         if row:
-            return jsonify(json.loads(row[0]))
+            data, updated_at = row
+            try:
+                ts = datetime.datetime.fromisoformat(updated_at)
+            except ValueError:
+                ts = datetime.datetime.min
+            if datetime.datetime.utcnow() - ts < CACHE_TTL:
+                return jsonify(json.loads(data))
 
     # Not in cache; fetch from remote
     rows = fetch_from_yahoo(code, days)
